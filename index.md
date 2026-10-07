@@ -3,34 +3,63 @@ layout: doc
 title: Resonance in a Driven Damped Oscillator
 ---
 
-# Resonance in a Driven Damped Oscillator: An Interactive Study
+<script setup>
+import CrtExplorer from './components/CrtExplorer.vue'
+</script>
 
-<p class="authors">A. Researcher<sup>1</sup>, B. Colleague<sup>2</sup><br>
-<sup>1</sup>Department of Physics, Example University · <sup>2</sup>Institute of Applied Mechanics</p>
+# Node-level Parallelisation of Ozaki Scheme II
+
+<p class="authors">Conor McLeod</p>
 
 <div class="abstract">
 
-**Abstract.** We examine how damping controls the response of a linear oscillator driven at a single frequency. Using the dimensionless model $\ddot{x} + 2\zeta\dot{x} + x = \cos(r\tau)$, we derive the steady-state amplitude, locate the resonance peak, and compare it with numerical integration from rest. The peak amplitude grows as $1/(2\zeta)$ for light damping and vanishes as a distinct maximum once $\zeta > 1/\sqrt{2}$. An interactive figure lets the reader vary $\zeta$ and $r$ and observe both the frequency response and the transient approach to steady state.
+**Abstract.**
+Driven by the AI boom, NVIDIAs newest accelerators increasingly prioritise low precision GEMMs ahead of FP64 GEMMs. 
+To keep FP64 GEMMs fast, we look to emulation techniques.
+The Ozaki Scheme II is an efficient FP64 GEMM emulation technique which uses the Chinese Remainder Theorem to perform high precision GEMMs on the INT8 tensor cores.
+This summer, I worked on a node-level Ozaki scheme library which runs on JUPITER.
 
-<p class="keywords"><b>Keywords:</b> resonance, damping, harmonic oscillator, quality factor, transient response</p>
+<p class="keywords"><b>Keywords:</b> GEMM, Ozaki Scheme, Chinese Remainder Theorem, harmonic oscillator, quality factor, transient response</p>
 
 </div>
 
 ## 1. Introduction
 
-Driven oscillators appear throughout physics and engineering, from RLC circuits and micromechanical resonators to bridges and atomic transitions. Their defining feature is *resonance*: when the drive frequency approaches the natural frequency, the response can far exceed the static displacement [1, 2].
+The General Matrix Multiply (GEMM) operation is perhaps the most ubiquitous 
 
-Static plots of the response curve hide how damping shapes both the peak height and the time needed to reach steady state. This article pairs the analytical result with a live simulation so that these dependencies can be explored directly. Section 2 states the model, Section 3 presents the interactive results, Section 4 discusses them, and Section 5 concludes.
+## 2. Background 
 
-## 2. Methods
+### 2.1 Chinese Remainder Theroem
 
-### 2.1 Model
+Let $x \in \mathbb{Z}$, and let $p_1, \dots, p_N \in \mathbb{N}_{\ge 2}$ be pairwise coprime with $\mathcal{P} := \prod_{i=1}^{N} p_i$.
 
-Scaling time by the natural frequency $\omega_0$ and displacement by the static deflection $F_0/k$ gives
+Let $q_i \in \mathbb{N}$ be the modular inverse of $\dfrac{\mathcal{P}}{p_i}$, such that:
 
 $$
-\ddot{x} + 2\zeta\,\dot{x} + x = \cos(r\tau), \qquad r = \frac{\omega}{\omega_0},\quad \zeta = \frac{c}{2\sqrt{km}}.
+\frac{\mathcal{P}}{p_i}\, q_i \equiv 1 \pmod{p_i}
 $$
+
+Suppose $x$ is known only through its residues:
+
+$$
+\begin{cases}
+x \equiv y_1 \pmod{p_1}, \\
+\quad \vdots \\
+x \equiv y_N \pmod{p_N}.
+\end{cases}
+$$
+
+Then $x$ is recovered modulo $\mathcal{P}$:
+
+$$
+x \equiv \sum_{i=1}^{N} \frac{\mathcal{P}}{p_i}\, q_i\, y_i \pmod{\mathcal{P}}
+$$
+
+This is a **weighted sum** of the residues: each $y_i$ gets a fixed weight $\frac{\mathcal{P}}{p_i}\, q_i$ that depends only on the moduli
+
+To better communicate the intution behind this
+
+<CrtExplorer />
 
 ### 2.2 Steady-state solution
 
@@ -54,15 +83,6 @@ The full solution, including the transient, is computed in the browser with a fo
 ## 3. Results
 
 Figure 1 shows the amplitude response (top) and the displacement from rest (bottom). Drag the sliders to change the damping ratio and drive frequency; the red marker on the response curve follows the chosen drive point.
-
-<figure class="fig">
-
-<ClientOnly>
-  <InteractivePlot />
-</ClientOnly>
-
-<figcaption><b>Figure 1.</b> Interactive resonance explorer. Top: steady-state amplitude versus frequency ratio, with faint reference curves for fixed ζ. Bottom: simulated displacement from rest; dashed lines mark the steady-state amplitude ±A.</figcaption>
-</figure>
 
 Table 1 summarizes the analytical peak values for typical damping ratios.
 
