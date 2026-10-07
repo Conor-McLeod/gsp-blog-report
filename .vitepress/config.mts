@@ -3,7 +3,7 @@ import footnote from 'markdown-it-footnote'
 
 export default defineConfig({
   base: '/gsp-blog-report/',
-  title: 'Resonance in a Driven Damped Oscillator',
+  title: 'Node-level Parallelisation of Ozaki Scheme II',
   description: 'An interactive scientific article built with VitePress',
   appearance: false,
   themeConfig: {

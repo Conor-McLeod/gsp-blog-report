@@ -1,6 +1,6 @@
 ---
 layout: doc
-title: Resonance in a Driven Damped Oscillator
+title: Node-level Parallelisation of Ozaki Scheme II
 ---
 
 <script setup>
@@ -17,7 +17,7 @@ import OzakiSteps from './components/OzakiSteps.vue'
 **Abstract.**
 Driven by the AI boom, NVIDIAs newest accelerators increasingly prioritise low precision GEMMs ahead of FP64 GEMMs. 
 To keep FP64 GEMMs fast, we look to emulation techniques.
-The Ozaki Scheme II is an efficient FP64 GEMM emulation technique which uses the Chinese Remainder Theorem to perform high precision GEMMs on the INT8 tensor cores.
+The Ozaki Scheme II is an efficient FP64 GEMM emulation technique which uses the Chinese Remainder Theorem to perform double precision GEMMs on the INT8 tensor cores.
 This summer, I worked on a node-level Ozaki scheme library which runs on JUPITER.
 
 <p class="keywords"><b>Keywords:</b> GEMM, Ozaki Scheme, Chinese Remainder Theorem</p>
@@ -32,16 +32,18 @@ Science and engineering codes have classically operated in the high precision [F
 
 But today, NVIDIA is designing their GPUs for a different crowd.
 Unlike scientific computing, mainstream deep learning rarely uses FP64.
+AI workloads are 
 The max precision you will see in deep learning is FP32, and with care, much lower precisions can be used.
 A range of low precision float formats have proliferated in the last few years.
 
 So the need for the Ozaki scheme arises out of  economic factors just as much as scientific ones.
 Nvidia is a profit making, publically-listed company, and they will go where the money is. 
 Traditional HPC cannot compete with the historically unprecedented level of capital expenditure behind the AI boom. 
-So if science and engineering want to pursue the best high precision GEMM performance, they must adapt to the way the hardware being designed today
+So if science and engineering want to pursue the best high precision GEMM performance, they must adapt to the way the hardware being designed today.[^1]
 
 The Ozaki Scheme II is a scheme for emulating FP64 matrix multiplication using the [Chinese Remainder Theorem](https://en.wikipedia.org/wiki/Chinese_remainder_theorem). 
 
+Nvidia added FP64 emulation on INT8 tensor cores to cuBLAS in [CUDA Toolkit 13.0 Update 2](https://developer.nvidia.com/blog/unlocking-tensor-core-performance-with-floating-point-emulation-in-cublas/).
 
 
 ## 2. Background 
@@ -91,32 +93,10 @@ Tensor cores are specialised hardware units on Nvidia GPUs for performing matrix
 
 ## 3. Results
 
-Figure 1 shows the amplitude response (top) and the displacement from rest (bottom). Drag the sliders to change the damping ratio and drive frequency; the red marker on the response curve follows the chosen drive point.
-
-Table 1 summarizes the analytical peak values for typical damping ratios.
-
-| ζ | Q = 1/(2ζ) | r<sub>peak</sub> | A<sub>max</sub> |
-|:---:|:---:|:---:|:---:|
-| 0.05 | 10.0 | 0.997 | 10.01 |
-| 0.10 | 5.0 | 0.990 | 5.03 |
-| 0.20 | 2.5 | 0.959 | 2.55 |
-| 0.50 | 1.0 | 0.707 | 1.15 |
-
-<p class="keywords"><b>Table 1.</b> Resonance peak for selected damping ratios.</p>
-
 ## 4. Discussion
-
-Three observations follow from the figure.
-
-1. **Peak height scales with $Q$.** Halving the damping roughly doubles the peak amplitude, consistent with $A_\mathrm{max} \approx Q$ for $\zeta \ll 1$.
-2. **The peak shifts downward in frequency.** The maximum occurs at $r_\mathrm{peak} < 1$ and moves further from $\omega_0$ as damping increases, disappearing entirely at $\zeta = 1/\sqrt{2}$.
-3. **Light damping slows settling.** Transients decay as $e^{-\zeta\tau}$, so a high-$Q$ system needs many cycles to reach steady state. Near resonance, the displacement grows through a slow beating envelope before saturating at $A$.
-
-The model is linear and has a single degree of freedom. Real systems may show nonlinear stiffness, multiple modes, or frequency-dependent damping, none of which are captured here.
 
 ## 5. Conclusion
 
-Damping sets the height, position, and sharpness of the resonance peak, and also the time needed to reach it. An interactive figure makes these coupled effects visible in a way static plots cannot. The same VitePress pattern—Markdown prose, LaTeX math, and a Vue component—can be reused for any article whose claims are best supported by a parameter the reader can change.
 
 ## Acknowledgements
 
@@ -125,7 +105,8 @@ I would like to thank Clément Richefort for supervising my project.
 ## References
 
 <ol class="references">
-<li>Landau, L. D., &amp; Lifshitz, E. M. (1976). <i>Mechanics</i> (3rd ed.). Pergamon Press.</li>
-<li>Thornton, S. T., &amp; Marion, J. B. (2004). <i>Classical Dynamics of Particles and Systems</i> (5th ed.). Brooks/Cole.</li>
-<li>Strogatz, S. H. (2015). <i>Nonlinear Dynamics and Chaos</i> (2nd ed.). Westview Press.</li>
+<li>K. Ozaki, T. Ogita, S. Oishi, and S. M. Rump, ‘Error-free transformations of matrix multiplication by using fast routines of matrix multiplication and its applications’, <i>Numer Algor</i>, vol. 59, no. 1, pp. 95–118, Jan. 2012, doi: <a href="https://doi.org/10.1007/s11075-011-9478-1">10.1007/s11075-011-9478-1</a>.</li>
+<li>Y. Uchino et al., ‘High-Performance and Power-Efficient Emulation of Matrix Multiplication using INT8 Matrix Engines’, in <i>Proceedings of the SC ’25 Workshops of the International Conference for High Performance Computing, Networking, Storage and Analysis</i>, in ACM Conferences, 2025, pp. 1824–1831. doi: <a href="https://doi.org/10.1145/3731599.3767539">10.1145/3731599.3767539</a>.</li>
 </ol>
+
+[^1]: Nvidia have said they are not abandoning the HPC community
