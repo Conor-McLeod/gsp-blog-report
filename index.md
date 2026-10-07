@@ -5,6 +5,7 @@ title: Resonance in a Driven Damped Oscillator
 
 <script setup>
 import CrtExplorer from './components/CrtExplorer.vue'
+import OzakiSteps from './components/OzakiSteps.vue'
 </script>
 
 # Node-level Parallelisation of Ozaki Scheme II
@@ -19,13 +20,29 @@ To keep FP64 GEMMs fast, we look to emulation techniques.
 The Ozaki Scheme II is an efficient FP64 GEMM emulation technique which uses the Chinese Remainder Theorem to perform high precision GEMMs on the INT8 tensor cores.
 This summer, I worked on a node-level Ozaki scheme library which runs on JUPITER.
 
-<p class="keywords"><b>Keywords:</b> GEMM, Ozaki Scheme, Chinese Remainder Theorem, harmonic oscillator, quality factor, transient response</p>
+<p class="keywords"><b>Keywords:</b> GEMM, Ozaki Scheme, Chinese Remainder Theorem</p>
 
 </div>
 
 ## 1. Introduction
 
-The General Matrix Multiply (GEMM) operation is perhaps the most ubiquitous 
+The General Matrix Multiply (GEMM) operation is perhaps the most ubiquitous mathematical operation we perform. On GPUs, we can perform these operations incredibly fast.
+
+Science and engineering codes have classically operated in the high precision [FP64](https://en.wikipedia.org/wiki/Double-precision_floating-point_format) regime.
+
+But today, NVIDIA is designing their GPUs for a different crowd.
+Unlike scientific computing, mainstream deep learning rarely uses FP64.
+The max precision you will see in deep learning is FP32, and with care, much lower precisions can be used.
+A range of low precision float formats have proliferated in the last few years.
+
+So the need for the Ozaki scheme arises out of  economic factors just as much as scientific ones.
+Nvidia is a profit making, publically-listed company, and they will go where the money is. 
+Traditional HPC cannot compete with the historically unprecedented level of capital expenditure behind the AI boom. 
+So if science and engineering want to pursue the best high precision GEMM performance, they must adapt to the way the hardware being designed today
+
+The Ozaki Scheme II is a scheme for emulating FP64 matrix multiplication using the [Chinese Remainder Theorem](https://en.wikipedia.org/wiki/Chinese_remainder_theorem). 
+
+
 
 ## 2. Background 
 
@@ -61,30 +78,16 @@ To better communicate the intution behind this
 
 <CrtExplorer />
 
-How to use the component:
-- $x$ is the input integer. This is what we are trying to reconstruct.
-- Each small "clock" represents the modulo operation of $x$ with our predetermined set of coprime moduli. The number on top of each clock is the modulus. The number below is the remainder or residue that the modulo operation returns. The hand of the clock points to this remainder. 
-- Use the slider to scale $N$, the number of moduli. As you scale N
-- The gauge at the bottom shows the number of bits that the set of modular congruences can represent. Increasing the number of moduli increases the representable range. The green line whos where the input number $x$ falls on this. 
+### 2.2 Ozaki Scheme II
 
-### 2.2 Steady-state solution
+Armed with an understanding of the Chinese Remainder Theorem. The idea is we can take input FP64 matrices, scale and truncate the values to convert them to large integers, then form matrices of residues for given moduli.
+We perform the matrix multiplication on these residues
 
-After transients decay, the response is $x_\mathrm{ss}(\tau) = A\cos(r\tau - \varphi)$ with
+<OzakiSteps />
 
-$$
-A(r) = \frac{1}{\sqrt{(1 - r^2)^2 + (2\zeta r)^2}}, \qquad
-\tan\varphi = \frac{2\zeta r}{1 - r^2}.
-$$
+### 2.3 INT8 Tensor Cores
 
-For $\zeta < 1/\sqrt{2}$ the amplitude is maximal at
-
-$$
-r_\mathrm{peak} = \sqrt{1 - 2\zeta^2}, \qquad A_\mathrm{max} = \frac{1}{2\zeta\sqrt{1 - \zeta^2}}.
-$$
-
-### 2.3 Numerical integration
-
-The full solution, including the transient, is computed in the browser with a fourth-order Runge–Kutta scheme (step $\Delta\tau = 0.02$) from the initial condition $x(0) = \dot{x}(0) = 0$.
+Tensor cores are specialised hardware units on Nvidia GPUs for performing matrix multiplication. Tensor cores support different number formats, and the lower the format, the better the performance.
 
 ## 3. Results
 
@@ -117,7 +120,7 @@ Damping sets the height, position, and sharpness of the resonance peak, and also
 
 ## Acknowledgements
 
-This work was supported by the (fictional) Example Science Foundation, grant 000-000.
+I would like to thank Clément Richefort for supervising my project.
 
 ## References
 

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 // The int8 moduli from par_gemmul8 (include/ozaki/crt_table_int8_data.hpp), in
 // library order: N moduli means the first N of these.
@@ -102,7 +102,7 @@ const done = computed(() => step.value >= N.value)
 const xhat = computed(() => 2n * partial.value >= P.value ? partial.value - P.value : partial.value)
 const exact = computed(() => x.value !== null && xhat.value === x.value)
 const wraps = computed(() => x.value === null ? 0n : (x.value - xhat.value) / P.value)
-const wrapTex = computed(() => `\\hat{x} = x ${wraps.value > 0n ? '-' : '+'} ${fmtTex(wraps.value < 0n ? -wraps.value : wraps.value)}\\,P`)
+const wrapTex = computed(() => `\\hat{x} = x ${wraps.value > 0n ? '-' : '+'} ${fmtTex(wraps.value < 0n ? -wraps.value : wraps.value)}\\,\\mathcal{P}`)
 
 let timer: ReturnType<typeof setInterval> | undefined
 function stop() {
@@ -129,16 +129,153 @@ onBeforeUnmount(stop)
 // ancestor's transform or overflow can clip it.
 
 const full = ref(false)
-function onKey(e: KeyboardEvent) {
-  if (e.key === 'Escape') full.value = false
-}
 watch(full, (on) => {
   document.documentElement.style.overflow = on ? 'hidden' : ''
-  if (on) window.addEventListener('keydown', onKey, true)
-  else window.removeEventListener('keydown', onKey, true)
 })
 onBeforeUnmount(() => {
   document.documentElement.style.overflow = ''
+})
+
+// --- tips and tour -----------------------------------------------------------
+// Each region of the widget carries data-tip="<id>". The ⓘ buttons show that
+// region's tip on hover (click to pin it); the guide steps through them all,
+// outlining each region in turn. Tip bodies may contain $…$ math.
+
+const TIPS = {
+  x: {
+    title: 'The integer x',
+    body: 'The number we hide and then try to recover. Type any integer, or a power of two like $2^{40}$ or $2^{63}-1$, or pick a preset.',
+  },
+  dials: {
+    title: 'Residues',
+    body: 'Each clock is one modulus $p_i$ (top). Its hand points at the residue $y_i = x \\bmod p_i$ (bottom): this is all the CRT gets to see of $x$. Residues are kept in $[-p_i/2,\\, p_i/2)$ so they fit in an int8. Click a clock to use the moduli up to it.',
+  },
+  n: {
+    title: 'Number of moduli',
+    body: 'Drag to choose $N$. Each modulus adds about 8 bits to $\\mathcal{P} = p_1 p_2 \\cdots p_N$. Press reconstruct to watch the sum build up one term at a time.',
+  },
+  ring: {
+    title: 'The ring of integers mod $\\mathcal{P}$',
+    body: 'The CRT only recovers $x$ modulo $\\mathcal{P}$, so the numbers live on a circle: going past $\\mathcal{P}/2$ wraps round to $-\\mathcal{P}/2$. The dashed circle marks $x$; the blue dot is the running sum $\\hat{x}$, which jumps with every term added.',
+  },
+  sum: {
+    title: 'The reconstruction',
+    body: 'The weighted sum of the residues, reduced mod $\\mathcal{P}$ into $[-\\mathcal{P}/2,\\, \\mathcal{P}/2)$. If $|x| < \\mathcal{P}/2$ then $\\hat{x} = x$ exactly; otherwise $\\hat{x}$ is off by a multiple of $\\mathcal{P}$.',
+  },
+  meter: {
+    title: 'Capacity',
+    body: 'The blue bar is how many bits the moduli can represent, $\\log_2(\\mathcal{P}/2)$. The marker is the size of $x$: green when it fits, red when it doesn\'t. Try $x = -2^{100}$ and lower $N$ until it turns red.',
+  },
+} as const
+type TipId = keyof typeof TIPS
+const TOUR: TipId[] = ['x', 'dials', 'n', 'ring', 'sum', 'meter']
+
+const esc = (s: string) => s.replace(/[&<>"]/g, c => `&${{ '&': 'amp', '<': 'lt', '>': 'gt', '"': 'quot' }[c]};`)
+// Odd pieces of the split are the insides of $…$.
+const rich = (s: string) => s.split('$').map((t, i) => i % 2 ? tex(t) : esc(t)).join('')
+// For aria-labels: $\mathcal{P}$ reads as P.
+const plain = (s: string) => s.replace(/\\mathcal\{(\w)\}/g, '$1').replaceAll('$', '')
+
+const root = ref<HTMLElement>()
+const card = ref<HTMLElement>()
+const tour = ref(-1) // step of the guide, -1 when it isn't running
+const hover = ref<{ id: TipId, el: HTMLElement, pinned: boolean } | null>(null)
+const tipId = computed(() => tour.value >= 0 ? TOUR[tour.value] : hover.value?.id)
+const region = (id: TipId) => root.value?.querySelector<HTMLElement>(`[data-tip="${id}"]`)
+
+function closeTip() {
+  tour.value = -1
+  hover.value = null
+}
+function goTo(i: number) {
+  if (i < 0 || i >= TOUR.length) return closeTip()
+  hover.value = null
+  tour.value = i
+  region(TOUR[i])?.scrollIntoView({ block: 'nearest' })
+  if (TOUR[i] === 'ring' && x.value !== null) replay()
+}
+
+function info(id: TipId) {
+  const show = (e: Event) => {
+    if (tour.value < 0 && !hover.value?.pinned)
+      hover.value = { id, el: e.currentTarget as HTMLElement, pinned: false }
+  }
+  const hide = () => {
+    if (!hover.value?.pinned) hover.value = null
+  }
+  return {
+    'class': 'info',
+    'aria-label': `About: ${plain(TIPS[id].title)}`,
+    'aria-expanded': tipId.value === id,
+    'onMouseenter': show,
+    'onFocus': show,
+    'onMouseleave': hide,
+    'onBlur': hide,
+    'onClick': (e: MouseEvent) => {
+      if (tour.value >= 0) return goTo(TOUR.indexOf(id))
+      if (hover.value?.pinned && hover.value.id === id) hover.value = null
+      else hover.value = { id, el: e.currentTarget as HTMLElement, pinned: true }
+    },
+  }
+}
+
+// The card is absolutely positioned inside the widget: centred on its anchor,
+// below it unless there's only room above.
+const cardPos = ref({ left: '0px', top: '0px' })
+async function place() {
+  await nextTick()
+  const r = root.value
+  const c = card.value
+  const a = tour.value >= 0 ? region(TOUR[tour.value]) : hover.value?.el
+  if (!r || !c || !a) return
+  const R = r.getBoundingClientRect()
+  const A = a.getBoundingClientRect()
+  const W = c.offsetWidth
+  const H = c.offsetHeight
+  const gap = 10
+  const above = A.bottom + gap + H > window.innerHeight && A.top - gap - H > 0
+  const top = (above ? A.top - gap - H : A.bottom + gap) - R.top + r.scrollTop
+  const left = Math.max(0, Math.min(R.width - W, A.left + A.width / 2 - W / 2 - R.left))
+  cardPos.value = { left: `${left}px`, top: `${top}px` }
+  if (tour.value >= 0) c.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+}
+watch([tipId, () => hover.value?.el, full], place)
+
+let ro: ResizeObserver | undefined
+function onResize() {
+  if (tipId.value) place()
+}
+// A pinned tip closes on a click anywhere else; the guide stays up so the
+// widget can be played with mid-tour.
+function onPointerDown(e: PointerEvent) {
+  const t = e.target as Element
+  if (hover.value?.pinned && !card.value?.contains(t) && !t.closest('.info')) hover.value = null
+}
+function onKey(e: KeyboardEvent) {
+  const typing = (e.target as Element)?.closest?.('input, textarea')
+  if (e.key === 'Escape') {
+    if (tipId.value) {
+      closeTip()
+      e.stopPropagation()
+    }
+    else if (full.value) full.value = false
+  }
+  else if (tour.value >= 0 && !typing && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
+    e.preventDefault()
+    goTo(tour.value + (e.key === 'ArrowRight' ? 1 : -1))
+  }
+}
+onMounted(() => {
+  ro = new ResizeObserver(onResize)
+  if (root.value) ro.observe(root.value)
+  window.addEventListener('resize', onResize)
+  window.addEventListener('pointerdown', onPointerDown, true)
+  window.addEventListener('keydown', onKey, true)
+})
+onBeforeUnmount(() => {
+  ro?.disconnect()
+  window.removeEventListener('resize', onResize)
+  window.removeEventListener('pointerdown', onPointerDown, true)
   window.removeEventListener('keydown', onKey, true)
 })
 
@@ -191,13 +328,19 @@ const pct = (b: number) => `${Math.min(100, (b / METER_MAX) * 100)}%`
 
 <template>
   <Teleport to="body" :disabled="!full">
-  <div class="crt" :class="{ full }" :role="full ? 'dialog' : undefined" :aria-modal="full || undefined" aria-label="CRT explorer">
-    <button class="expand" :title="full ? 'Exit fullscreen (Esc)' : 'Fullscreen'" :aria-label="full ? 'Exit fullscreen' : 'Fullscreen'" @click="full = !full">
-      <svg v-if="!full" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4" /></svg>
-      <svg v-else width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2v4H2M14 6h-4V2M10 14v-4h4M2 10h4v4" /></svg>
-    </button>
+  <div ref="root" class="crt" :class="{ full }" :role="full ? 'dialog' : undefined" :aria-modal="full || undefined" aria-label="CRT explorer">
+    <div class="corner">
+      <button class="guide" :class="{ on: tour >= 0 }" title="Step-by-step guide to the explorer" @click="tour >= 0 ? closeTip() : goTo(0)">
+        {{ tour >= 0 ? 'end guide' : '? guide' }}
+      </button>
+      <button class="expand" :title="full ? 'Exit fullscreen (Esc)' : 'Fullscreen'" :aria-label="full ? 'Exit fullscreen' : 'Fullscreen'" @click="full = !full">
+        <svg v-if="!full" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4" /></svg>
+        <svg v-else width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2v4H2M14 6h-4V2M10 14v-4h4M2 10h4v4" /></svg>
+      </button>
+    </div>
     <div class="ring-panel">
-      <div class="ring-col">
+      <div class="ring-col" data-tip="ring" :class="{ spot: tipId === 'ring' && tour >= 0 }">
+        <button v-bind="info('ring')">i</button>
         <div class="ring-wrap">
           <svg :viewBox="`0 0 ${RING} ${RING}`" role="img" aria-label="Running CRT sum on the ring of integers mod P">
             <circle :cx="RING / 2" :cy="RING / 2" :r="RR" class="track-ring" />
@@ -207,9 +350,9 @@ const pct = (b: number) => `${Math.min(100, (b / METER_MAX) * 100)}%`
           </svg>
           <!-- KaTeX can't render inside <svg>, so the ring's labels sit on top of it. -->
           <span class="lbl" :style="{ top: `calc(${ringPct(RING / 2 - RR)} - 24px)` }" v-html="tex('0')" />
-          <span class="lbl" :style="{ top: `calc(${ringPct(RING / 2 + RR)} + 6px)` }" v-html="tex('\\pm P/2')" />
-          <span class="lbl big" :style="{ top: 'calc(50% - 28px)' }" v-html="tex('\\mathbb{Z}/P\\mathbb{Z}')" />
-          <span class="lbl" :style="{ top: 'calc(50% + 6px)' }">integers mod P</span>
+          <span class="lbl" :style="{ top: `calc(${ringPct(RING / 2 + RR)} + 6px)` }" v-html="tex('\\pm \\mathcal{P}/2')" />
+          <span class="lbl big" :style="{ top: 'calc(50% - 28px)' }" v-html="tex('\\mathbb{Z}/\\mathcal{P}\\mathbb{Z}')" />
+          <span class="lbl" :style="{ top: 'calc(50% + 6px)' }" v-html="rich('integers mod $\\mathcal{P}$')" />
         </div>
 
         <div class="legend">
@@ -218,10 +361,10 @@ const pct = (b: number) => `${Math.min(100, (b / METER_MAX) * 100)}%`
         </div>
       </div>
 
-      <div class="sum-col">
+      <div class="sum-col" data-tip="sum" :class="{ spot: tipId === 'sum' && tour >= 0 }">
         <div class="readout">
-          <div v-html="tex(`P = ${fmtTex(P)}`)" />
-          <div v-if="x !== null" v-html="tex(`\\hat{x} = \\textstyle\\sum_{i=1}^{${Math.min(step, N)}} \\frac{P}{p_i} q_i y_i \\bmod P`)" />
+          <div class="pline"><span v-html="tex(`\\mathcal{P} = ${fmtTex(P)}`)" /><button v-bind="info('sum')">i</button></div>
+          <div v-if="x !== null" v-html="tex(`\\hat{x} = \\textstyle\\sum_{i=1}^{${Math.min(step, N)}} \\frac{\\mathcal{P}}{p_i} q_i y_i \\bmod \\mathcal{P}`)" />
           <div v-if="x !== null" class="xhat" v-html="tex(`\\phantom{\\hat{x}} = ${fmtTex(xhat)}`)" />
         </div>
 
@@ -233,7 +376,7 @@ const pct = (b: number) => `${Math.min(100, (b / METER_MAX) * 100)}%`
     </div>
 
     <div class="inputs">
-      <div class="controls">
+      <div class="controls" data-tip="x" :class="{ spot: tipId === 'x' && tour >= 0 }">
         <label class="xin">
           <span class="k" v-html="tex('x =')" />
           <input v-model="xText" spellcheck="false" :class="{ bad: x === null }" @keydown.stop>
@@ -241,17 +384,20 @@ const pct = (b: number) => `${Math.min(100, (b / METER_MAX) * 100)}%`
         <div class="presets">
           <button v-for="p in presets" :key="p.v" @click="xText = p.v" v-html="tex(p.label)" />
           <button @click="randomX">random</button>
+          <button v-bind="info('x')">i</button>
         </div>
       </div>
 
-      <div class="controls">
+      <div class="controls" data-tip="n" :class="{ spot: tipId === 'n' && tour >= 0 }">
         <label class="nin">
           <span class="k" v-html="tex(`N = ${N}`)" />
           <input v-model.number="N" type="range" min="2" max="20">
         </label>
         <button class="primary" :disabled="x === null" @click="replay">▶︎ reconstruct</button>
+        <button v-bind="info('n')">i</button>
       </div>
 
+      <div class="dials-row" data-tip="dials" :class="{ spot: tipId === 'dials' && tour >= 0 }">
       <div class="dials">
         <button
           v-for="(p, i) in MODULI" :key="i" class="dial"
@@ -272,10 +418,12 @@ const pct = (b: number) => `${Math.min(100, (b / METER_MAX) * 100)}%`
           <span class="y">{{ i < N && x !== null ? fmt(residues[i]) : '·' }}</span>
         </button>
       </div>
+      <button v-bind="info('dials')">i</button>
+      </div>
 
-      <div class="meter">
+      <div class="meter" data-tip="meter" :class="{ spot: tipId === 'meter' && tour >= 0 }">
         <div class="meter-head">
-          <span v-html="tex(`P/2 \\approx 2^{${capBits.toFixed(1)}}`)" />
+          <span><span v-html="tex(`\\mathcal{P}/2 \\approx 2^{${capBits.toFixed(1)}}`)" /><button v-bind="info('meter')">i</button></span>
           <span v-if="x !== null" v-html="tex(`|x| \\approx 2^{${needBits.toFixed(1)}}`)" />
         </div>
         <div class="track">
@@ -286,6 +434,22 @@ const pct = (b: number) => `${Math.min(100, (b / METER_MAX) * 100)}%`
           <span v-for="b in [0, 32, 64, 96, 128, 160]" :key="b" :style="{ left: pct(b) }">{{ b }}</span>
         </div>
         <div class="axis-label">bits</div>
+      </div>
+    </div>
+
+    <div
+      v-if="tipId" ref="card" class="tip" :class="{ touring: tour >= 0 }" :style="cardPos"
+      :role="tour >= 0 ? 'dialog' : 'tooltip'" :aria-label="plain(TIPS[tipId].title)"
+    >
+      <div class="tip-head">
+        <strong v-html="rich(TIPS[tipId].title)" />
+        <button v-if="tour >= 0 || hover?.pinned" class="tip-x" aria-label="Close" @click="closeTip">×</button>
+      </div>
+      <p v-html="rich(TIPS[tipId].body)" />
+      <div v-if="tour >= 0" class="tip-nav">
+        <span class="dim">{{ tour + 1 }} / {{ TOUR.length }}</span>
+        <button :disabled="tour === 0" @click="goTo(tour - 1)">back</button>
+        <button class="primary" @click="goTo(tour + 1)">{{ tour === TOUR.length - 1 ? 'done' : 'next' }}</button>
       </div>
     </div>
   </div>
@@ -324,15 +488,20 @@ html.dark .crt {
   --bad: #e25555;
 }
 
-.expand {
+.corner {
   position: absolute;
   top: 0;
   right: 0;
   z-index: 1;
+  display: flex;
+  gap: 6px;
+}
+.expand {
   display: grid;
   place-items: center;
   padding: 5px;
 }
+.guide.on { color: var(--accent); border-color: var(--accent); }
 .expand svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 
 .crt.full {
@@ -345,7 +514,7 @@ html.dark .crt {
   background: var(--vp-c-bg, var(--surface));
   font-size: 14px;
 }
-.crt.full .expand { position: fixed; top: 12px; right: 12px; }
+.crt.full .corner { position: fixed; top: 12px; right: 12px; }
 .crt.full .ring-col { max-width: min(560px, 55vh); }
 .crt.full .readout { font-size: 18px; }
 
@@ -470,4 +639,50 @@ button:disabled { opacity: 0.4; cursor: default; }
 .verdict.ok { color: var(--good-text); }
 .verdict.ko { color: var(--bad); }
 .verdict.pending { color: var(--ink-2); }
+
+/* --- tips and guide --- */
+.info {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  margin-left: 6px;
+  border-radius: 50%;
+  color: var(--ink-3);
+  font: italic 600 10px/1 Georgia, serif;
+  vertical-align: middle;
+}
+.info[aria-expanded="true"] { color: var(--accent); border-color: var(--accent); }
+.ring-col { position: relative; }
+.ring-col > .info { position: absolute; top: 0; left: 0; margin: 0; }
+.pline { display: flex; align-items: center; }
+.dials-row { display: flex; align-items: center; gap: 4px; }
+.dials-row .dials { flex: 1; }
+.dials-row > .info { margin: 0; }
+
+[data-tip] { border-radius: 6px; outline: 2px solid transparent; outline-offset: 4px; transition: outline-color 0.2s; }
+[data-tip].spot { outline-color: var(--accent); }
+
+.tip {
+  position: absolute;
+  z-index: 5;
+  width: min(320px, 100%);
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.12);
+  color: var(--ink-2);
+  font-size: 13px;
+  line-height: 1.45;
+  pointer-events: none;
+}
+.tip.touring, .tip:has(.tip-x) { pointer-events: auto; }
+.tip-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; color: var(--ink); }
+.tip p { margin: 4px 0 0; }
+.tip-x { padding: 0 6px; border: none; background: none; font-size: 16px; line-height: 1; }
+.tip-nav { display: flex; align-items: center; gap: 6px; margin-top: 10px; }
+.tip-nav .dim { margin-right: auto; font-size: 11px; }
 </style>
