@@ -61,6 +61,12 @@ To better communicate the intution behind this
 
 <CrtExplorer />
 
+How to use the component:
+- $x$ is the input integer. This is what we are trying to reconstruct.
+- Each small "clock" represents the modulo operation of $x$ with our predetermined set of coprime moduli. The number on top of each clock is the modulus. The number below is the remainder or residue that the modulo operation returns. The hand of the clock points to this remainder. 
+- Use the slider to scale $N$, the number of moduli. As you scale N
+- The gauge at the bottom shows the number of bits that the set of modular congruences can represent. Increasing the number of moduli increases the representable range. The green line whos where the input number $x$ falls on this. 
+
 ### 2.2 Steady-state solution
 
 After transients decay, the response is $x_\mathrm{ss}(\tau) = A\cos(r\tau - \varphi)$ with

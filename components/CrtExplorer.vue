@@ -150,14 +150,16 @@ function dialHand(i: number) {
   return { x: DIAL / 2 + DR * 0.82 * Math.sin(a), y: DIAL / 2 - DR * 0.82 * Math.cos(a) }
 }
 
-const RING = 210
-const RR = 82
+const RING = 300
+const RR = 134
 // Position of v on the ring Z/P, 0 at the top and ±P/2 at the bottom.
 function ringPoint(v: bigint) {
   const frac = Number((mod(v, P.value) * 1_000_000n) / P.value) / 1_000_000
   const a = frac * 2 * Math.PI
   return { x: RING / 2 + RR * Math.sin(a), y: RING / 2 - RR * Math.cos(a) }
 }
+// The ring scales with its column, so HTML labels are placed by percentage.
+const ringPct = (v: number) => `${(v / RING) * 100}%`
 const target = computed(() => ringPoint(x.value ?? 0n))
 const dot = computed(() => ringPoint(partial.value))
 
@@ -170,7 +172,43 @@ const pct = (b: number) => `${Math.min(100, (b / METER_MAX) * 100)}%`
 
 <template>
   <div class="crt">
-    <div class="left">
+    <div class="ring-panel">
+      <div class="ring-col">
+        <div class="ring-wrap">
+          <svg :viewBox="`0 0 ${RING} ${RING}`" role="img" aria-label="Running CRT sum on the ring of integers mod P">
+            <circle :cx="RING / 2" :cy="RING / 2" :r="RR" class="track-ring" />
+            <line :x1="RING / 2" :y1="RING / 2 - RR - 6" :x2="RING / 2" :y2="RING / 2 - RR + 6" class="zero" />
+            <circle v-if="x !== null" :cx="target.x" :cy="target.y" r="9" class="target" />
+            <circle v-if="x !== null" :cx="dot.x" :cy="dot.y" r="5.5" class="dot" />
+          </svg>
+          <!-- KaTeX can't render inside <svg>, so the ring's labels sit on top of it. -->
+          <span class="lbl" :style="{ top: `calc(${ringPct(RING / 2 - RR)} - 24px)` }" v-html="tex('0')" />
+          <span class="lbl" :style="{ top: `calc(${ringPct(RING / 2 + RR)} + 6px)` }" v-html="tex('\\pm P/2')" />
+          <span class="lbl big" :style="{ top: 'calc(50% - 28px)' }" v-html="tex('\\mathbb{Z}/P\\mathbb{Z}')" />
+          <span class="lbl" :style="{ top: 'calc(50% + 6px)' }">integers mod P</span>
+        </div>
+
+        <div class="legend">
+          <span><svg width="20" height="20" aria-hidden="true"><circle cx="10" cy="10" r="8" class="target" /></svg>target <span v-html="tex('x')" /></span>
+          <span><svg width="20" height="20" aria-hidden="true"><circle cx="10" cy="10" r="5.5" class="dot" /></svg>running sum <span v-html="tex('\\hat{x}')" /></span>
+        </div>
+      </div>
+
+      <div class="sum-col">
+        <div class="readout">
+          <div v-html="tex(`P = ${fmtTex(P)}`)" />
+          <div v-if="x !== null" v-html="tex(`\\hat{x} = \\textstyle\\sum_{i=1}^{${Math.min(step, N)}} \\frac{P}{p_i} q_i y_i \\bmod P`)" />
+          <div v-if="x !== null" class="xhat" v-html="tex(`\\phantom{\\hat{x}} = ${fmtTex(xhat)}`)" />
+        </div>
+
+        <div v-if="x === null" class="verdict ko">✗ not an integer</div>
+        <div v-else-if="!done" class="verdict pending">summing term {{ step }} of {{ N }}…</div>
+        <div v-else-if="exact" class="verdict ok">✓ <span v-html="tex('\\hat{x} = x')" />: recovered exactly</div>
+        <div v-else class="verdict ko">✗ <span v-html="tex(wrapTex)" />: wrapped</div>
+      </div>
+    </div>
+
+    <div class="inputs">
       <div class="controls">
         <label class="xin">
           <span class="k" v-html="tex('x =')" />
@@ -226,38 +264,6 @@ const pct = (b: number) => `${Math.min(100, (b / METER_MAX) * 100)}%`
         <div class="axis-label">bits</div>
       </div>
     </div>
-
-    <div class="right">
-      <div class="ring-wrap" :style="{ width: `${RING}px`, height: `${RING}px` }">
-        <svg :width="RING" :height="RING" role="img" aria-label="Running CRT sum on the ring of integers mod P">
-          <circle :cx="RING / 2" :cy="RING / 2" :r="RR" class="track-ring" />
-          <line :x1="RING / 2" :y1="RING / 2 - RR - 6" :x2="RING / 2" :y2="RING / 2 - RR + 6" class="zero" />
-          <circle v-if="x !== null" :cx="target.x" :cy="target.y" r="9" class="target" />
-          <circle v-if="x !== null" :cx="dot.x" :cy="dot.y" r="5.5" class="dot" />
-        </svg>
-        <!-- KaTeX can't render inside <svg>, so the ring's labels sit on top of it. -->
-        <span class="lbl" :style="{ top: `${RING / 2 - RR - 24}px` }" v-html="tex('0')" />
-        <span class="lbl" :style="{ top: `${RING / 2 + RR + 6}px` }" v-html="tex('\\pm P/2')" />
-        <span class="lbl big" :style="{ top: `${RING / 2 - 20}px` }" v-html="tex('\\mathbb{Z}/P\\mathbb{Z}')" />
-        <span class="lbl" :style="{ top: `${RING / 2 + 4}px` }">integers mod P</span>
-      </div>
-
-      <div class="legend">
-        <span><svg width="20" height="20" aria-hidden="true"><circle cx="10" cy="10" r="8" class="target" /></svg>target <span v-html="tex('x')" /></span>
-        <span><svg width="20" height="20" aria-hidden="true"><circle cx="10" cy="10" r="5.5" class="dot" /></svg>running sum <span v-html="tex('\\hat{x}')" /></span>
-      </div>
-
-      <div class="readout">
-        <div v-html="tex(`P = ${fmtTex(P)}`)" />
-        <div v-if="x !== null" v-html="tex(`\\hat{x} = \\textstyle\\sum_{i=1}^{${Math.min(step, N)}} \\frac{P}{p_i} q_i y_i \\bmod P`)" />
-        <div v-if="x !== null" class="xhat" v-html="tex(`\\phantom{\\hat{x}} = ${fmtTex(xhat)}`)" />
-      </div>
-
-      <div v-if="x === null" class="verdict ko">✗ not an integer</div>
-      <div v-else-if="!done" class="verdict pending">summing term {{ step }} of {{ N }}…</div>
-      <div v-else-if="exact" class="verdict ok">✓ <span v-html="tex('\\hat{x} = x')" />: recovered exactly</div>
-      <div v-else class="verdict ko">✗ <span v-html="tex(wrapTex)" />: wrapped</div>
-    </div>
   </div>
 </template>
 
@@ -273,9 +279,9 @@ const pct = (b: number) => `${Math.min(100, (b / METER_MAX) * 100)}%`
   --good-text: #006300;
   --bad: #d03b3b;
 
-  display: grid;
-  grid-template-columns: 1fr 230px;
-  gap: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
   color: var(--ink);
   font-size: 13px;
   line-height: 1.3;
@@ -299,10 +305,11 @@ input { font-family: var(--slidev-code-font-family, ui-monospace, monospace); }
 .controls {
   display: flex;
   align-items: center;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 8px 12px;
   margin-bottom: 10px;
 }
-.xin { display: flex; align-items: center; gap: 6px; flex: 1; }
+.xin { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 220px; }
 .xin input {
   flex: 1;
   min-width: 0;
@@ -313,7 +320,7 @@ input { font-family: var(--slidev-code-font-family, ui-monospace, monospace); }
   color: var(--ink);
 }
 .xin input.bad { border-color: var(--bad); }
-.presets { display: flex; gap: 4px; }
+.presets { display: flex; flex-wrap: wrap; gap: 4px; }
 button {
   padding: 3px 8px;
   border: 1px solid var(--line);
@@ -383,11 +390,14 @@ button:disabled { opacity: 0.4; cursor: default; }
 .ticks span { position: absolute; transform: translateX(-50%); top: 2px; }
 .axis-label { color: var(--ink-3); font-size: 10px; text-align: right; }
 
-.right { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.ring-panel { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 12px 28px; }
+.ring-col { display: flex; flex-direction: column; align-items: center; gap: 6px; flex: 1 1 280px; max-width: 420px; padding-top: 8px; }
+.sum-col { display: flex; flex-direction: column; gap: 12px; flex: 1 1 260px; }
 .track-ring { fill: none; stroke: var(--line); stroke-width: 2; }
-.ring-wrap { position: relative; }
+.ring-wrap { position: relative; width: 100%; aspect-ratio: 1; margin-bottom: 10px; }
+.ring-wrap svg { display: block; width: 100%; height: 100%; }
 .lbl { position: absolute; left: 50%; transform: translateX(-50%); white-space: nowrap; color: var(--ink-3); font-size: 11px; }
-.lbl.big { font-size: 15px; color: var(--ink-2); }
+.lbl.big { font-size: 20px; color: var(--ink-2); }
 .legend { display: flex; gap: 12px; color: var(--ink-2); font-size: 11px; }
 .legend > span { display: flex; align-items: center; gap: 3px; }
 .target { fill: none; stroke: var(--ink-2); stroke-width: 1.5; stroke-dasharray: 3 2; }
@@ -397,7 +407,7 @@ button:disabled { opacity: 0.4; cursor: default; }
   stroke-width: 2;
   transition: cx 0.35s, cy 0.35s;
 }
-.readout { width: 100%; color: var(--ink); }
+.readout { color: var(--ink); font-size: 15px; line-height: 1.6; }
 .readout .xhat { overflow-x: auto; }
 .verdict {
   width: 100%;
