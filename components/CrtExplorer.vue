@@ -123,6 +123,25 @@ watch([x, N], () => {
 })
 onBeforeUnmount(stop)
 
+// --- fullscreen --------------------------------------------------------------
+// A fixed overlay rather than the Fullscreen API, which iOS doesn't support on
+// arbitrary elements. The widget is teleported to <body> while expanded so no
+// ancestor's transform or overflow can clip it.
+
+const full = ref(false)
+function onKey(e: KeyboardEvent) {
+  if (e.key === 'Escape') full.value = false
+}
+watch(full, (on) => {
+  document.documentElement.style.overflow = on ? 'hidden' : ''
+  if (on) window.addEventListener('keydown', onKey, true)
+  else window.removeEventListener('keydown', onKey, true)
+})
+onBeforeUnmount(() => {
+  document.documentElement.style.overflow = ''
+  window.removeEventListener('keydown', onKey, true)
+})
+
 function randomX() {
   const bits = 24 + Math.floor(Math.random() * 120)
   let v = 0n
@@ -171,7 +190,12 @@ const pct = (b: number) => `${Math.min(100, (b / METER_MAX) * 100)}%`
 </script>
 
 <template>
-  <div class="crt">
+  <Teleport to="body" :disabled="!full">
+  <div class="crt" :class="{ full }" :role="full ? 'dialog' : undefined" :aria-modal="full || undefined" aria-label="CRT explorer">
+    <button class="expand" :title="full ? 'Exit fullscreen (Esc)' : 'Fullscreen'" :aria-label="full ? 'Exit fullscreen' : 'Fullscreen'" @click="full = !full">
+      <svg v-if="!full" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4" /></svg>
+      <svg v-else width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2v4H2M14 6h-4V2M10 14v-4h4M2 10h4v4" /></svg>
+    </button>
     <div class="ring-panel">
       <div class="ring-col">
         <div class="ring-wrap">
@@ -265,6 +289,7 @@ const pct = (b: number) => `${Math.min(100, (b / METER_MAX) * 100)}%`
       </div>
     </div>
   </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -279,6 +304,7 @@ const pct = (b: number) => `${Math.min(100, (b / METER_MAX) * 100)}%`
   --good-text: #006300;
   --bad: #d03b3b;
 
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -297,6 +323,31 @@ html.dark .crt {
   --good-text: #3fc43f;
   --bad: #e25555;
 }
+
+.expand {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  padding: 5px;
+}
+.expand svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+
+.crt.full {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  justify-content: safe center;
+  overflow-y: auto;
+  padding: 48px max(16px, calc((100vw - 1100px) / 2));
+  background: var(--vp-c-bg, var(--surface));
+  font-size: 14px;
+}
+.crt.full .expand { position: fixed; top: 12px; right: 12px; }
+.crt.full .ring-col { max-width: min(560px, 55vh); }
+.crt.full .readout { font-size: 18px; }
 
 .k { color: var(--ink-2); font-weight: 600; }
 .dim { color: var(--ink-3); }
