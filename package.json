@@ -1,0 +1,16 @@
+{
+  "name": "vitepress-scientific-article",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vitepress dev",
+    "build": "vitepress build",
+    "preview": "vitepress preview"
+  },
+  "devDependencies": {
+    "markdown-it-mathjax3": "^4.3.2",
+    "plotly.js-dist-min": "^2.35.2",
+    "vitepress": "^1.5.0",
+    "vue": "^3.5.0"
+  }
+}
