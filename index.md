@@ -18,7 +18,8 @@ import OzakiSteps from './components/OzakiSteps.vue'
 Driven by the AI boom, NVIDIAs newest accelerators increasingly prioritise low precision GEMMs ahead of FP64 GEMMs. 
 To keep FP64 GEMMs fast, we look to emulation techniques.
 The Ozaki Scheme II is an efficient FP64 GEMM emulation technique which uses the Chinese Remainder Theorem to perform double precision GEMMs on the INT8 tensor cores.
-This summer, I worked on a node-level Ozaki scheme library which runs on JUPITER.
+This summer, I worked on a node-level Ozaki scheme library which runs on JUPITER. 
+
 
 <p class="keywords"><b>Keywords:</b> GEMM, Ozaki Scheme, Chinese Remainder Theorem</p>
 
@@ -32,7 +33,7 @@ Science and engineering codes have classically operated in the high precision [F
 
 But today, NVIDIA is designing their GPUs for a different crowd.
 Unlike scientific computing, mainstream deep learning rarely uses FP64.
-AI workloads are 
+AI workloads are error tolerant.
 The max precision you will see in deep learning is FP32, and with care, much lower precisions can be used.
 A range of low precision float formats have proliferated in the last few years.
 
@@ -91,9 +92,18 @@ We perform the matrix multiplication on these residues
 
 Tensor cores are specialised hardware units on Nvidia GPUs for performing matrix multiplication. Tensor cores support different number formats, and the lower the format, the better the performance.
 
-## 3. Results
+## 3. par_gemmul8
 
-## 4. Discussion
+The library I worked on, `par_gemmul8`, is based on (GEMMul8)[https://github.com/RIKEN-RCCS/GEMMul8], the Ozaki II library developed by Yuki Uchino et. al., authors of the Ozaki II paper.
+Our library builds on GEMMul8, adapting it for JUPITER's 4xGH200 nodes.
+The core thesis is that by 
+
+
+## 4. Profile analysis with DuckDB
+
+Due to the nature of the codebase, I was 12 NSight Systems
+
+[DuckDB](https://duckdb.org/) is an in-process analytical database — you can think of it as SQLite3 but for analytics. It has a great CLI and clients for most major languages. The Python client runs DuckDB inside a Python process.
 
 ## 5. Conclusion
 
