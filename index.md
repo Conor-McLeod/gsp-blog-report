@@ -29,22 +29,36 @@ This summer, I worked on a node-level Ozaki scheme library which runs on JUPITER
 
 ## 1. Introduction
 
-The General Matrix Multiply (GEMM) operation is perhaps the most ubiquitous mathematical operation we perform. On GPUs, we can perform these operations incredibly fast.
+The General Matrix Multiply (GEMM) operation is perhaps the most ubiquitous mathematical operation we perform.
+On GPUs, we can perform these operations incredibly fast.
 
-Science and engineering codes have classically operated in the high precision [FP64](https://en.wikipedia.org/wiki/Double-precision_floating-point_format) regime.
+Science and engineering codes have classically operated in the high-precision [FP64](https://en.wikipedia.org/wiki/Double-precision_floating-point_format) regime.
+Dense linear algebra solvers, electronic-structure methods in computational chemistry and codes for lattice QCD, material science and mathematical finance all make use of FP64 GEMMs. 
+The reason for the FP64 requirement in these applications varies: they might involve ill-conditioned problems, have strict relative error requirements (relative error $< 10^{-15}$), or the computation might be long enough such that that the accumulation of small errors starts to matter. 
 
-But today, NVIDIA is designing their GPUs for a different crowd.
-Unlike scientific computing, mainstream deep learning rarely uses FP64.
-AI workloads are error tolerant.
-The max precision you will see in deep learning is FP32, and with care, much lower precisions can be used.
-A range of low precision float formats have proliferated in the last few years.
+Porting science and engineering codes to GPUs, most notably NVIDIA GPUs, has yielded extraordinary returns in performance over the past fifteen years or so.
+We have taken for granted that each new GPU generation brings approximately a 2x improvement in FLOPS on FP64.
+
+Today, NVIDIA designs its GPUs for a different market. 
+The AI boom has driven unprecedented capital expenditure on accelerators like GPUs and NVIDIA's revenue growth since the boom began has been astounding; NVIDIA data centre revenue was $15 billion in FY2023, $47.5 billion in FY2024, $115.2 billion in FY2025 and $193.7 billion in FY2026.
+This revenue growth is driven almost entirely by demand for AI.
+As a profit-seeking, publically-listed company, NVIDIA has and will continue to "follow the money", and the shape of their accelerators is changing as a result. 
+Unlike much of scientific computing, mainstream deep learning rarely uses FP64.
+AI workloads are error tolerant; deep learning uses single precision at most, and with care, much lower precision floating-point formats can be used.
+Subsequently, while peak tensor core FLOPs have continued to soar over the last few generations, FP64 performance has actually _fallen_, as NVIDIA prioritises the performance of AI workloads on its GPUs.
+The generation-on-generation performance improvements that science and engineering codes have historically taken for granted are now no longer guaranteed. 
+Furthemore, "traditional HPC" doesn't have the spending power to compete with AI demand, and thus has limited ability to sway NVIDIA's priorities when designing new chips.
+
+![GPU precision over generations](plots/nvidia_precision.png)
+
+So what can be done about this? 
+If we take the changes to the hardware as out of our control, then we must seek software level solutions; that is, somehow emulating FP64 GEMMs using the lower-precision tensor cores. 
+The Ozaki Scheme II is one such scheme for emulating FP64 matrix multiplication using the [Chinese Remainder Theorem](https://en.wikipedia.org/wiki/Chinese_remainder_theorem). 
+
 
 So the need for the Ozaki scheme arises out of  economic factors just as much as scientific ones.
-Nvidia is a profit making, publically-listed company, and they will go where the money is. 
-Traditional HPC cannot compete with the historically unprecedented level of capital expenditure behind the AI boom. 
-So if science and engineering want to pursue the best high precision GEMM performance, they must adapt to the way the hardware being designed today.[^1]
+So if science and engineering want to pursue the best high-precision GEMM performance, they must adapt to the way the hardware being designed today.[^1]
 
-The Ozaki Scheme II is a scheme for emulating FP64 matrix multiplication using the [Chinese Remainder Theorem](https://en.wikipedia.org/wiki/Chinese_remainder_theorem). 
 
 Nvidia added FP64 emulation on INT8 tensor cores to cuBLAS in [CUDA Toolkit 13.0 Update 2](https://developer.nvidia.com/blog/unlocking-tensor-core-performance-with-floating-point-emulation-in-cublas/).
 
@@ -96,10 +110,11 @@ Tensor cores are specialised hardware units on Nvidia GPUs for performing matrix
 
 ## 3. par_gemmul8
 
-The library I worked on, `par_gemmul8`, is based on (GEMMul8)[https://github.com/RIKEN-RCCS/GEMMul8], the Ozaki II library developed by Yuki Uchino et. al., authors of the Ozaki II paper.
+The library I worked on, `par_gemmul8`, is based on [GEMMul8](https://github.com/RIKEN-RCCS/GEMMul8), the Ozaki II library developed by Yuki Uchino et. al., authors of the Ozaki II paper.
 Our library builds on GEMMul8, adapting it for JUPITER's 4xGH200 nodes.
-The core thesis is that by 
-
+The core thesis is that by using the fast interconnects of JUPITER's nodes
+For comparison purposes, we vendored the `par_gemmul8` code into our library.
+<!--reference the particular commit at which we vendored GEMMul8, since the library has evolved since then-->
 
 ## 4. Moving the exchange onto the copy engines
 
