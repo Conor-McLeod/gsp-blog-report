@@ -67,7 +67,11 @@ Nvidia added FP64 emulation on INT8 tensor cores to cuBLAS in [CUDA Toolkit 13.0
 
 ### 2.1 Chinese Remainder Theroem
 
-Let $x \in \mathbb{Z}$, and let $p_1, \dots, p_N \in \mathbb{N}_{\ge 2}$ be pairwise coprime with $\mathcal{P} := \prod_{i=1}^{N} p_i$.
+The Chinese Remainder Theorem (CRT) says that if you know the remainders of an unknown integer $x$ when divided by each of a set of pairwise coprime integers, then $x$ is uniquely determined modulo the product of those integers.
+Its applications include the [Prime-factor FFT algorithm](https://en.wikipedia.org/wiki/Prime-factor_FFT_algorithm) and implementations of [RSA cryptography](https://en.wikipedia.org/wiki/RSA_cryptosystem#Using_the_Chinese_remainder_algorithm).
+Roughly speaking, it gives us a way of representing a large integer as a collection of smaller ones, and, crucially, of doing arithmetic on those smaller pieces independently before recombining them.
+
+As a more formal definition, let $x \in \mathbb{Z}$, and let $p_1, \dots, p_N \in \mathbb{N}_{\ge 2}$ be pairwise coprime with $\mathcal{P} := \prod_{i=1}^{N} p_i$.
 
 Let $q_i \in \mathbb{N}$ be the modular inverse of $\dfrac{\mathcal{P}}{p_i}$, such that:
 
@@ -91,15 +95,26 @@ $$
 x \equiv \sum_{i=1}^{N} \frac{\mathcal{P}}{p_i}\, q_i\, y_i \pmod{\mathcal{P}}
 $$
 
-This is a **weighted sum** of the residues: each $y_i$ gets a fixed weight $\frac{\mathcal{P}}{p_i}\, q_i$ that depends only on the moduli
+This is a **weighted sum** of the residues: each $y_i$ gets a fixed weight $\frac{\mathcal{P}}{p_i}\, q_i$ that depends only on the moduli.
 
-To better communicate the intution behind this
+Since residues are only defined up to multiples of their modulus, we are free to choose which representative to use.
+Rather than the usual non-negative range $[0, p_i)$, we use the symmetric range $[-p_i/2, p_i/2)$, so each $y_i$ may be negative.
+Likewise, the reconstructed value is taken in $[-\mathcal{P}/2, \mathcal{P}/2)$, which lets us represent signed integers $x$ as long as $|x| < \mathcal{P}/2$.
+
+To build intuition for the CRT, the playground below draws each modulus $p_i$ as a small clock whose hand points to the residue $y_i$.
+Pressing *reconstruct* accumulates the weighted sum one term at a time on the large clock, which represents $\mathbb{Z}/\mathcal{P}\mathbb{Z}$, until the running sum lands on $x$.
+Try increasing $x$ or reducing $N$: once $|x|$ exceeds $\mathcal{P}/2$, the reconstruction wraps around and recovers the wrong value.
 
 <CrtExplorer />
 
+The main takeaways are:
+- The moduli are the largest pairwise coprime integers no greater than 256. Keeping them at most 256 means their symmetric residues always fit in int8, and choosing the largest ones maximises $\mathcal{P}$. 
+- Using more moduli increases their product $\mathcal{P}$, and thus the range of integers $x$ we can represent.
+- Each modulus is close to $2^8$, so it adds roughly 8 bits of range: $N$ moduli represent integers of about $8N$ bits. As we'll see, each extra modulus also costs one extra INT8 matrix multiplication, so $N$ trades accuracy against speed.
+
 ### 2.2 Ozaki Scheme II
 
-Armed with an understanding of the Chinese Remainder Theorem. The idea is we can take input FP64 matrices, scale and truncate the values to convert them to large integers, then form matrices of residues for given moduli.
+Armed with an understanding of the Chinese Remainder Theorem, we can now tackle the Ozaki Scheme II. The idea is we can take input FP64 matrices, scale and truncate the values to convert them to large integers, then form matrices of residues for given moduli.
 We perform the matrix multiplication on these residues
 
 <OzakiSteps />
