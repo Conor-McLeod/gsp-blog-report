@@ -515,7 +515,8 @@ html.dark .crt {
   font-size: 14px;
 }
 .crt.full .corner { position: fixed; top: 12px; right: 12px; }
-.crt.full .ring-col { max-width: min(560px, 55vh); }
+/* The ring gets whatever height the padding, legend and inputs below leave. */
+.crt.full .ring-col { max-width: clamp(240px, 100dvh - 480px, 560px); }
 .crt.full .readout { font-size: 18px; }
 
 .k { color: var(--ink-2); font-weight: 600; }
