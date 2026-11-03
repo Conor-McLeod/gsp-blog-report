@@ -139,7 +139,7 @@ const calc = computed(() => {
 
   // Direct CRT reconstruction, as in the paper and par_gemmul8's inverse_scaling
   // (exact here; the kernel uses double-double): S = sum_i w_i * U_i with weights
-  // w_i = (P / p_i) * q_i, then one correction C'' = S - P * round(S / P).
+  // w_i = (P / p_i) * q_i, then one correction C' = S - P * round(S / P).
   // S[k - 1] is the running sum after k terms, for the animation.
   const P = mods.reduce((a, p) => a * BigInt(p), 1n)
   const w = mods.map((p) => {
@@ -158,12 +158,12 @@ const calc = computed(() => {
     if (2n * r > P) r -= P
     return (v - r) / P // round(S / P)
   }))
-  const Cpp = S[n - 1].map((row, i) => row.map((v, j) => v - Q[i][j] * P))
+  const Cp = S[n - 1].map((row, i) => row.map((v, j) => v - Q[i][j] * P))
   const exactProd = Ac.map(row => Array.from({ length: NC }, (_, j) => row.reduce((a, x, h) => a + x * Bc[h][j], 0n)))
-  const crtOk = Cpp.every((row, i) => row.every((v, j) => v === exactProd[i][j]))
+  const crtOk = Cp.every((row, i) => row.every((v, j) => v === exactProd[i][j]))
 
   // Undo the scaling.
-  const C = Cpp.map((row, i) => row.map((v, j) => Number(v) * 2 ** (-sA[i] - sB[j])))
+  const C = Cp.map((row, i) => row.map((v, j) => Number(v) * 2 ** (-sA[i] - sB[j])))
 
   // Error against the exact product of the FP64 inputs.
   const ref = A.map(row => Array.from({ length: NC }, (_, j) =>
@@ -175,7 +175,7 @@ const calc = computed(() => {
   }))) / refMax
   const fp64 = A.map(row => Array.from({ length: NC }, (_, j) => row.reduce((a, x, h) => a + x * B[h][j], 0)))
 
-  return { mods, l2P, sA, sB, Ac, Bc, Alo, Blo, Cmid, P, w, S, Q, Cpp, crtOk, C, err: relErr(C), errFp64: relErr(fp64) }
+  return { mods, l2P, sA, sB, Ac, Bc, Alo, Blo, Cmid, P, w, S, Q, Cp, crtOk, C, err: relErr(C), errFp64: relErr(fp64) }
 })
 
 // --- presentation state ---------------------------------------------------------
@@ -184,13 +184,16 @@ const STEPS = [
   { name: 'FP64 inputs', text: 'Entries span six orders of magnitude.' },
   { name: 'Scale & truncate', text: String.raw`Scale each row of $A$ and column of $B$ by a power of two, then truncate to integers: $A' = \operatorname{trunc}(\operatorname{diag}(\mu)\,A)$, $B' = \operatorname{trunc}(B\,\operatorname{diag}(\nu))$. The powers are as large as possible while keeping every $|A'B'| < \mathcal{P}/2$, so they grow with $N$: each extra modulus buys about 4 more bits per factor. Truncation is the only rounding step.` },
   { name: 'Slice', text: String.raw`For each modulus, $A'_i = A' \bmod p_i$ (signed): $N$ int8 slices of each input. $A'$ itself depends on $N$ through $\mathcal{P}$, so changing $N$ changes every slice, even for a modulus that was already there.` },
-  { name: 'N int8 GEMMs', text: String.raw`$C_i = A'_i B'_i \bmod p_i$, one int8 tensor-core GEMM per modulus. They are independent: this is the work par_gemmul8 distributes.` },
+  { name: 'N int8 GEMMs', text: String.raw`$C'_i = A'_i B'_i \bmod p_i$, one int8 tensor-core GEMM per modulus. They are independent: this is the work par_gemmul8 distributes.` },
   { name: 'CRT', text: String.raw`Direct CRT reconstruction: weight each slice by $w_i = (\mathcal{P}/p_i)\,q_i$, which is $\equiv 1 \pmod{p_i}$ and $\equiv 0$ mod every other modulus, and add. The $N$ terms are independent, one fma each per entry. The sum $S$ is far outside $[-\mathcal{P}/2, \mathcal{P}/2)$; one correction $S - \mathcal{P}\,\operatorname{round}(S/\mathcal{P})$ brings it back, and there it equals $A'B'$ exactly.` },
-  { name: 'Unscale', text: String.raw`Undo the powers of two: $C = \operatorname{diag}(\mu)^{-1}\,C''\,\operatorname{diag}(\nu)^{-1}$.` },
+  { name: 'Unscale', text: String.raw`Undo the powers of two: $C = \operatorname{diag}(\mu)^{-1}\,C'\,\operatorname{diag}(\nu)^{-1}$.` },
 ]
 const s = computed(() => Math.min(Math.max(step.value, 0), STEPS.length - 1))
 
 const sel = ref(0) // which slice is in front
+// GEMM step: the C' cell under the cursor, as [row, col], so the row of A' and
+// column of B' that produce it can be highlighted.
+const hl = ref<[number, number] | null>(null)
 // CRT step: how many weighted terms are in the sum; N + 1 means the final
 // S - P * round(S / P) correction has been applied.
 const merged = ref(1)
@@ -211,6 +214,7 @@ function replayCrt() {
 }
 watch([s, N], () => {
   stopTimer()
+  hl.value = null
   sel.value = Math.min(sel.value, N.value - 1)
   merged.value = N.value + 1
   if (s.value === 4) {
@@ -280,11 +284,20 @@ function cPlaneStyle(t: number) {
   const pos = Math.max(0, t - merged.value + 1)
   return { transform: `translate(${pos * D.value}px, ${-pos * D.value}px)`, zIndex: N.value - t }
 }
+// Labels ride just above the topmost plane of their stack (clearing the front
+// plane's tag), inside a stack padded by LABEL_H so they never collide with
+// the matrix above.
+const LABEL_H = 24
+const fan = (expanded: boolean) => expanded ? (N.value - 1) * D.value : 0
+function labelStyle(lift: number, tagged: boolean) {
+  return { top: `${STACK_PAD + LABEL_H - Math.max(lift, tagged ? 10 : 0) - 4}px` }
+}
+const cLift = computed(() => s.value === 4 ? Math.max(0, N.value - merged.value) * D.value : fan(cSliced.value))
 const merging = computed(() => s.value === 4)
 const terms = computed(() => Math.min(merged.value, N.value))
 const corrected = computed(() => merged.value > N.value)
-// What the front card shows: the running sum, or C'' once corrected.
-const cur = computed(() => corrected.value ? calc.value.Cpp : calc.value.S[terms.value - 1])
+// What the front card shows: the running sum, or C' once corrected.
+const cur = computed(() => corrected.value ? calc.value.Cp : calc.value.S[terms.value - 1])
 const maxBits = (X: bigint[][]) => Math.max(...X.flat().map(v => log2Big(v < 0n ? -v : v)))
 const aSliced = computed(() => s.value >= 2)
 const cSliced = computed(() => s.value === 2 || s.value === 3)
@@ -309,15 +322,15 @@ function infoC(i: number, j: number) {
   const c = calc.value
   if (s.value === 3) {
     const t = sel.value + 1
-    return String.raw`$C_{${t}}[${i},${j}] = A'_{${t}}[${i},:] \cdot B'_{${t}}[:,${j}] \bmod ${c.mods[t - 1]} = ${c.Cmid[t - 1][i][j]}$`
+    return String.raw`$C'_{${t}}[${i},${j}] = A'_{${t}}[${i},:] \cdot B'_{${t}}[:,${j}] \bmod ${c.mods[t - 1]} = ${c.Cmid[t - 1][i][j]}$`
   }
   if (s.value === 4) {
     const k = terms.value
     const sum = c.Cmid.slice(0, k).map((m, t) => String.raw`w_{${t + 1}} \cdot ${paren(m[i][j])}`).join(' + ')
     if (!corrected.value) return `$S[${i},${j}] = ${sum} = ${texNum(rawInt(c.S[k - 1][i][j]))}$`
-    return String.raw`$S[${i},${j}] = ${texNum(rawInt(c.S[N.value - 1][i][j]))}$, $\operatorname{round}(S/\mathcal{P}) = ${c.Q[i][j]}$, $C''[${i},${j}] = S - ${paren(c.Q[i][j])}\,\mathcal{P} = ${c.Cpp[i][j]}$`
+    return String.raw`$S[${i},${j}] = ${texNum(rawInt(c.S[N.value - 1][i][j]))}$, $\operatorname{round}(S/\mathcal{P}) = ${c.Q[i][j]}$, $C'[${i},${j}] = S - ${paren(c.Q[i][j])}\,\mathcal{P} = ${c.Cp[i][j]}$`
   }
-  if (s.value === 5) return String.raw`$C[${i},${j}] = C''[${i},${j}] \times 2^{${-c.sA[i] - c.sB[j]}} = ${texNum(c.C[i][j].toString())}$`
+  if (s.value === 5) return String.raw`$C[${i},${j}] = C'[${i},${j}] \times 2^{${-c.sA[i] - c.sB[j]}} = ${texNum(c.C[i][j].toString())}$`
   return ''
 }
 
@@ -337,31 +350,32 @@ const caption = computed(() => {
   <div class="oz">
     <!-- Laid out as a multiplication table: B above C, A to its left, so each
          row of A lines up with a row of C and each column of B with a column of C. -->
-    <div class="figure" @mouseleave="hover = ''">
+    <div class="figure" @mouseleave="hover = ''; hl = null">
       <div class="controls">
         <div class="nav">
           <button :disabled="s === 0" @click="step = s - 1">←</button>
           <button :disabled="s === STEPS.length - 1" @click="step = s + 1">→</button>
         </div>
-        <label>N = {{ N }}
+        <!-- Fixed-width number, so the flexed slider doesn't resize under the cursor. -->
+        <label>N = <span class="n">{{ N }}</span>
           <input v-model.number="N" type="range" min="2" max="20" @keydown.stop>
         </label>
         <button @click="seed = (seed * 48271) % 2147483647">new matrices</button>
       </div>
       <!-- B -->
       <div class="mat b">
-        <div class="label" v-html="tex(s === 0 ? 'B' : s === 1 ? `B'` : `B'_i`)" />
-        <div class="shifts cols" :class="{ show: s === 1 }" :style="{ gridTemplateColumns: `repeat(${NC}, var(--cw))` }">
-          <span v-for="(v, j) in calc.sB" :key="j">×2<sup>{{ String(v).replace('-', '−') }}</sup></span>
-        </div>
-        <div class="stack" :style="{ paddingTop: `${STACK_PAD - 16}px`, paddingRight: `${STACK_PAD}px` }">
+        <div class="stack" :style="{ paddingTop: `${STACK_PAD + LABEL_H}px`, paddingRight: `${STACK_PAD}px` }">
+          <div class="label" :style="labelStyle(fan(aSliced) + (s === 1 ? 16 : 0), aSliced)" v-html="tex(s === 0 ? 'B' : s === 1 ? `B'` : `B'_i`)" />
+          <div class="shifts cols" :class="{ show: s === 1 }" :style="{ top: `${STACK_PAD + LABEL_H}px`, gridTemplateColumns: `repeat(${NC}, var(--cw))` }">
+            <span v-for="(v, j) in calc.sB" :key="j">×2<sup>{{ String(v).replace('-', '−') }}</sup></span>
+          </div>
           <div v-for="t in N" :key="t" class="plane" :class="{ front: t - 1 === sel || !aSliced }"
                :style="[planeStyle(t - 1, aSliced), { gridTemplateColumns: `repeat(${NC}, var(--cw))` }]">
             <template v-if="t - 1 === sel || (!aSliced && t === 1)">
               <template v-for="(row, h) in inputs.B" :key="h">
-                <div v-for="(x, j) in row" :key="j" class="cell"
+                <div v-for="(x, j) in row" :key="j" class="cell" :class="{ hl: hl?.[1] === j }"
                      :style="s === 0 ? tintFp(x) : s === 1 ? tintBits(calc.Bc[h][j], calc.l2P + 1) : {}"
-                     @mouseenter="hover = infoB(h, j)">
+                     @mouseenter="hover = infoB(h, j); hl = null">
                   {{ s === 0 ? fmtFp(x) : s === 1 ? fmtInt(calc.Bc[h][j]) : calc.Blo[sel][h][j] }}
                 </div>
               </template>
@@ -372,19 +386,19 @@ const caption = computed(() => {
       </div>
       <!-- A -->
       <div class="mat">
-        <div class="label" v-html="tex(s === 0 ? 'A' : s === 1 ? `A'` : `A'_i`)" />
         <div class="with-shifts">
           <div class="shifts rows" :class="{ show: s === 1 }">
             <span v-for="(v, i) in calc.sA" :key="i">×2<sup>{{ String(v).replace('-', '−') }}</sup></span>
           </div>
-          <div class="stack" :style="{ paddingTop: `${STACK_PAD}px`, paddingRight: `${STACK_PAD}px` }">
+          <div class="stack" :style="{ paddingTop: `${STACK_PAD + LABEL_H}px`, paddingRight: `${STACK_PAD}px` }">
+            <div class="label" :style="labelStyle(fan(aSliced), aSliced)" v-html="tex(s === 0 ? 'A' : s === 1 ? `A'` : `A'_i`)" />
             <div v-for="t in N" :key="t" class="plane" :class="{ front: t - 1 === sel || !aSliced }"
                  :style="[planeStyle(t - 1, aSliced), { gridTemplateColumns: `repeat(${K}, var(--cw))` }]">
               <template v-if="t - 1 === sel || (!aSliced && t === 1)">
                 <template v-for="(row, i) in inputs.A" :key="i">
-                  <div v-for="(x, h) in row" :key="h" class="cell"
+                  <div v-for="(x, h) in row" :key="h" class="cell" :class="{ hl: hl?.[0] === i }"
                        :style="s === 0 ? tintFp(x) : s === 1 ? tintBits(calc.Ac[i][h], calc.l2P + 1) : {}"
-                       @mouseenter="hover = infoA(i, h)">
+                       @mouseenter="hover = infoA(i, h); hl = null">
                     {{ s === 0 ? fmtFp(x) : s === 1 ? fmtInt(calc.Ac[i][h]) : calc.Alo[sel][i][h] }}
                   </div>
                 </template>
@@ -397,15 +411,15 @@ const caption = computed(() => {
 
       <!-- C -->
       <div class="mat">
-        <div class="label" v-html="tex(s === 3 ? 'C_i' : s === 4 ? (corrected ? `C'' = A'B'` : 'S') : 'C')" />
-        <div class="stack" :style="{ paddingTop: `${STACK_PAD}px`, paddingRight: `${STACK_PAD}px` }">
+        <div class="stack" :style="{ paddingTop: `${STACK_PAD + LABEL_H}px`, paddingRight: `${STACK_PAD}px` }">
+          <div class="label" :style="labelStyle(cLift, cSliced || merging)" v-html="tex(s === 0 || s === 5 ? 'C' : s === 1 ? `C'` : s === 4 ? (corrected ? `C' = A'B'` : 'S') : `C'_i`)" />
           <div v-for="t in N" :key="t" class="plane" :class="{ front: merging ? t === 1 : t - 1 === sel || !cSliced, pending: s < 3 }"
                :style="[cPlaneStyle(t - 1), { gridTemplateColumns: `repeat(${NC}, var(--cw))` }]">
             <template v-if="merging ? t === 1 : t - 1 === sel || (!cSliced && t === 1)">
               <template v-for="i in M" :key="i">
-                <div v-for="j in NC" :key="j" class="cell" :class="{ settled: merging && corrected }"
+                <div v-for="j in NC" :key="j" class="cell" :class="{ settled: merging && corrected, hl: hl?.[0] === i - 1 && hl?.[1] === j - 1 }"
                      :style="s === 4 ? tintBits(cur[i - 1][j - 1], log2Big(calc.P) + 12) : s === 5 ? tintFp(calc.C[i - 1][j - 1]) : {}"
-                     @mouseenter="hover = infoC(i - 1, j - 1)">
+                     @mouseenter="hover = infoC(i - 1, j - 1); hl = s === 3 ? [i - 1, j - 1] : null">
                   <template v-if="s < 3">?</template>
                   <template v-else-if="s === 3">{{ calc.Cmid[sel][i - 1][j - 1] }}</template>
                   <template v-else-if="s === 4">{{ fmtInt(cur[i - 1][j - 1]) }}</template>
@@ -414,7 +428,7 @@ const caption = computed(() => {
               </template>
             </template>
             <span v-if="cSliced && t - 1 === sel" class="tag">mod {{ calc.mods[sel] }}</span>
-            <span v-if="merging && t === 1" class="tag" v-html="md(corrected ? String.raw`$-\mathcal{P}\,\operatorname{round}(S/\mathcal{P})$` : String.raw`$\sum w_i C_i$: ${terms} of ${N}`)" />
+            <span v-if="merging && t === 1" class="tag" v-html="md(corrected ? String.raw`$-\mathcal{P}\,\operatorname{round}(S/\mathcal{P})$` : String.raw`$\sum w_i C'_i$: ${terms} of ${N}`)" />
           </div>
         </div>
       </div>
@@ -477,14 +491,22 @@ sup { font-size: 0.72em; line-height: 0; }
 .figure { display: grid; grid-template-columns: auto auto; align-items: end; justify-content: center; gap: 4px; }
 .mat { display: flex; flex-direction: column; }
 .mat.b { justify-self: start; }
-.label { font-weight: 700; color: var(--ink-2); margin-bottom: 2px; }
+.label {
+  position: absolute;
+  left: 0;
+  transform: translateY(-100%);
+  font-weight: 700;
+  color: var(--ink-2);
+  white-space: nowrap;
+  transition: top 0.5s cubic-bezier(0.45, 0, 0.55, 1);
+}
 .explain :deep(.katex), .label :deep(.katex), .tag :deep(.katex) { font-size: 1.08em; }
 
 .with-shifts { display: flex; align-items: flex-end; }
 .shifts { color: var(--ink-2); font-size: 10.5px; opacity: 0; transition: opacity 0.3s; font-family: var(--slidev-code-font-family, ui-monospace, monospace); }
 .shifts.show { opacity: 1; }
 .shifts.rows { display: grid; grid-auto-rows: 26px; align-items: center; padding-right: 4px; width: 40px; text-align: right; }
-.shifts.cols { display: grid; height: 16px; text-align: center; }
+.shifts.cols { position: absolute; left: 0; display: grid; height: 16px; transform: translateY(-100%); text-align: center; }
 
 .stack { position: relative; display: grid; }
 .plane {
@@ -513,6 +535,7 @@ sup { font-size: 0.72em; line-height: 0; }
 }
 .plane.pending .cell { color: var(--ink-3); }
 .cell.settled { box-shadow: inset 0 0 0 1.5px var(--good); }
+.cell.hl { background: color-mix(in srgb, var(--accent) 22%, var(--surface)); box-shadow: inset 0 0 0 1.5px var(--accent); }
 .tag {
   position: absolute;
   top: -9px;
@@ -552,8 +575,25 @@ button:disabled { opacity: 0.35; cursor: default; }
 .caption.ok { color: var(--good-text); font-weight: 600; }
 .replay { padding: 0 6px; font-weight: 400; }
 .hover { color: var(--ink-2); font-style: italic; font-size: 11.5px; min-height: 1.4em; font-family: var(--slidev-code-font-family, ui-monospace, monospace); font-style: normal; }
-.controls { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; align-self: end; padding: 0 52px 12px 0; color: var(--ink-2); font-size: 12px; }
-.controls label { display: flex; align-items: center; gap: 6px; }
-.controls input { width: 110px; accent-color: var(--accent); }
-.nav { display: flex; gap: 4px; }
+.controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  /* Over A's front plane: clear of its shift column on the left and its fan on
+     the right, level with B's bottom edge. */
+  align-self: end;
+  margin: 0 44px 0 40px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: 14px;
+}
+.controls button { padding: 5px 12px; border-radius: 6px; font-size: 13px; }
+.controls label { display: flex; align-items: center; gap: 10px; }
+.controls input { flex: 1; accent-color: var(--accent); }
+.controls .n { display: inline-block; width: 2ch; margin-left: -6px; font-variant-numeric: tabular-nums; }
+.nav { display: flex; gap: 6px; }
+.nav button { flex: 1; font-size: 16px; line-height: 1.2; }
 </style>
