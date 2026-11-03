@@ -191,7 +191,6 @@ const STEPS = [
 const s = computed(() => Math.min(Math.max(step.value, 0), STEPS.length - 1))
 
 const sel = ref(0) // which slice is in front
-const pinned = ref(false)
 // CRT step: how many weighted terms are in the sum; N + 1 means the final
 // S - P * round(S / P) correction has been applied.
 const merged = ref(1)
@@ -212,23 +211,14 @@ function replayCrt() {
 }
 watch([s, N], () => {
   stopTimer()
-  pinned.value = false
   sel.value = Math.min(sel.value, N.value - 1)
   merged.value = N.value + 1
-  if (s.value === 3) {
-    sel.value = 0
-    timer = setInterval(() => { if (!pinned.value) sel.value = (sel.value + 1) % N.value }, 900)
-  }
   if (s.value === 4) {
     sel.value = 0
     replayCrt()
   }
 }, { immediate: true })
 onBeforeUnmount(stopTimer)
-function pick(t: number) {
-  sel.value = t
-  pinned.value = true
-}
 
 const hover = ref('')
 
@@ -297,7 +287,7 @@ const corrected = computed(() => merged.value > N.value)
 const cur = computed(() => corrected.value ? calc.value.Cpp : calc.value.S[terms.value - 1])
 const maxBits = (X: bigint[][]) => Math.max(...X.flat().map(v => log2Big(v < 0n ? -v : v)))
 const aSliced = computed(() => s.value >= 2)
-const cSliced = computed(() => s.value === 3)
+const cSliced = computed(() => s.value === 2 || s.value === 3)
 
 // --- hover text ---------------------------------------------------------------
 
@@ -305,36 +295,36 @@ function infoA(i: number, h: number) {
   const c = calc.value
   const x = inputs.value.A[i][h]
   if (s.value === 0) return `$A[${i},${h}] = ${x}$`
-  if (s.value === 1) return `$A'[${i},${h}] = \operatorname{trunc}(${texNum(rawFp(x))} \times 2^{${c.sA[i]}}) = ${c.Ac[i][h]}$`
-  return `$A'_{${sel.value + 1}}[${i},${h}] = ${c.Ac[i][h]} \bmod ${c.mods[sel.value]} = ${c.Alo[sel.value][i][h]}$`
+  if (s.value === 1) return String.raw`$A'[${i},${h}] = \operatorname{trunc}(${texNum(rawFp(x))} \times 2^{${c.sA[i]}}) = ${c.Ac[i][h]}$`
+  return String.raw`$A'_{${sel.value + 1}}[${i},${h}] = ${c.Ac[i][h]} \bmod ${c.mods[sel.value]} = ${c.Alo[sel.value][i][h]}$`
 }
 function infoB(h: number, j: number) {
   const c = calc.value
   const x = inputs.value.B[h][j]
   if (s.value === 0) return `$B[${h},${j}] = ${x}$`
-  if (s.value === 1) return `$B'[${h},${j}] = \operatorname{trunc}(${texNum(rawFp(x))} \times 2^{${c.sB[j]}}) = ${c.Bc[h][j]}$`
-  return `$B'_{${sel.value + 1}}[${h},${j}] = ${c.Bc[h][j]} \bmod ${c.mods[sel.value]} = ${c.Blo[sel.value][h][j]}$`
+  if (s.value === 1) return String.raw`$B'[${h},${j}] = \operatorname{trunc}(${texNum(rawFp(x))} \times 2^{${c.sB[j]}}) = ${c.Bc[h][j]}$`
+  return String.raw`$B'_{${sel.value + 1}}[${h},${j}] = ${c.Bc[h][j]} \bmod ${c.mods[sel.value]} = ${c.Blo[sel.value][h][j]}$`
 }
 function infoC(i: number, j: number) {
   const c = calc.value
   if (s.value === 3) {
     const t = sel.value + 1
-    return `$C_{${t}}[${i},${j}] = A'_{${t}}[${i},:] \cdot B'_{${t}}[:,${j}] \bmod ${c.mods[t - 1]} = ${c.Cmid[t - 1][i][j]}$`
+    return String.raw`$C_{${t}}[${i},${j}] = A'_{${t}}[${i},:] \cdot B'_{${t}}[:,${j}] \bmod ${c.mods[t - 1]} = ${c.Cmid[t - 1][i][j]}$`
   }
   if (s.value === 4) {
     const k = terms.value
-    const sum = c.Cmid.slice(0, k).map((m, t) => `w_{${t + 1}} \cdot ${paren(m[i][j])}`).join(' + ')
+    const sum = c.Cmid.slice(0, k).map((m, t) => String.raw`w_{${t + 1}} \cdot ${paren(m[i][j])}`).join(' + ')
     if (!corrected.value) return `$S[${i},${j}] = ${sum} = ${texNum(rawInt(c.S[k - 1][i][j]))}$`
-    return `$S[${i},${j}] = ${texNum(rawInt(c.S[N.value - 1][i][j]))}$, $\operatorname{round}(S/\mathcal{P}) = ${c.Q[i][j]}$, $C''[${i},${j}] = S - ${paren(c.Q[i][j])}\,\mathcal{P} = ${c.Cpp[i][j]}$`
+    return String.raw`$S[${i},${j}] = ${texNum(rawInt(c.S[N.value - 1][i][j]))}$, $\operatorname{round}(S/\mathcal{P}) = ${c.Q[i][j]}$, $C''[${i},${j}] = S - ${paren(c.Q[i][j])}\,\mathcal{P} = ${c.Cpp[i][j]}$`
   }
-  if (s.value === 5) return `$C[${i},${j}] = C''[${i},${j}] \times 2^{${-c.sA[i] - c.sB[j]}} = ${texNum(c.C[i][j].toString())}$`
+  if (s.value === 5) return String.raw`$C[${i},${j}] = C''[${i},${j}] \times 2^{${-c.sA[i] - c.sB[j]}} = ${texNum(c.C[i][j].toString())}$`
   return ''
 }
 
 const caption = computed(() => {
   const c = calc.value
   if (s.value === 4) {
-    if (!corrected.value) return `${terms.value} of ${N.value} terms: $|S| \approx 2^{${maxBits(cur.value).toFixed(0)}}$, but $\mathcal{P}/2 \approx 2^{${(log2Big(c.P) - 1).toFixed(0)}}$`
+    if (!corrected.value) return String.raw`${terms.value} of ${N.value} terms: $|S| \approx 2^{${maxBits(cur.value).toFixed(0)}}$, but $\mathcal{P}/2 \approx 2^{${(log2Big(c.P) - 1).toFixed(0)}}$`
     return c.crtOk ? String.raw`✓ $S - \mathcal{P}\,\operatorname{round}(S/\mathcal{P}) = A'B'$ exactly` : '✗ CRT mismatch'
   }
   if (s.value === 5) return `max relative error $${texNum(rawErr(c.err))}$ with $N = ${N.value}$ (plain FP64 $AB$: $${texNum(rawErr(c.errFp64))}$)`
@@ -345,7 +335,41 @@ const caption = computed(() => {
 
 <template>
   <div class="oz">
+    <!-- Laid out as a multiplication table: B above C, A to its left, so each
+         row of A lines up with a row of C and each column of B with a column of C. -->
     <div class="figure" @mouseleave="hover = ''">
+      <div class="controls">
+        <div class="nav">
+          <button :disabled="s === 0" @click="step = s - 1">←</button>
+          <button :disabled="s === STEPS.length - 1" @click="step = s + 1">→</button>
+        </div>
+        <label>N = {{ N }}
+          <input v-model.number="N" type="range" min="2" max="20" @keydown.stop>
+        </label>
+        <button @click="seed = (seed * 48271) % 2147483647">new matrices</button>
+      </div>
+      <!-- B -->
+      <div class="mat b">
+        <div class="label" v-html="tex(s === 0 ? 'B' : s === 1 ? `B'` : `B'_i`)" />
+        <div class="shifts cols" :class="{ show: s === 1 }" :style="{ gridTemplateColumns: `repeat(${NC}, var(--cw))` }">
+          <span v-for="(v, j) in calc.sB" :key="j">×2<sup>{{ String(v).replace('-', '−') }}</sup></span>
+        </div>
+        <div class="stack" :style="{ paddingTop: `${STACK_PAD - 16}px`, paddingRight: `${STACK_PAD}px` }">
+          <div v-for="t in N" :key="t" class="plane" :class="{ front: t - 1 === sel || !aSliced }"
+               :style="[planeStyle(t - 1, aSliced), { gridTemplateColumns: `repeat(${NC}, var(--cw))` }]">
+            <template v-if="t - 1 === sel || (!aSliced && t === 1)">
+              <template v-for="(row, h) in inputs.B" :key="h">
+                <div v-for="(x, j) in row" :key="j" class="cell"
+                     :style="s === 0 ? tintFp(x) : s === 1 ? tintBits(calc.Bc[h][j], calc.l2P + 1) : {}"
+                     @mouseenter="hover = infoB(h, j)">
+                  {{ s === 0 ? fmtFp(x) : s === 1 ? fmtInt(calc.Bc[h][j]) : calc.Blo[sel][h][j] }}
+                </div>
+              </template>
+            </template>
+            <span v-if="aSliced && t - 1 === sel" class="tag">mod {{ calc.mods[sel] }}</span>
+          </div>
+        </div>
+      </div>
       <!-- A -->
       <div class="mat">
         <div class="label" v-html="tex(s === 0 ? 'A' : s === 1 ? `A'` : `A'_i`)" />
@@ -371,37 +395,10 @@ const caption = computed(() => {
         </div>
       </div>
 
-      <div class="op">×</div>
-
-      <!-- B -->
-      <div class="mat">
-        <div class="label" v-html="tex(s === 0 ? 'B' : s === 1 ? `B'` : `B'_i`)" />
-        <div class="shifts cols" :class="{ show: s === 1 }" :style="{ gridTemplateColumns: `repeat(${NC}, var(--cw))` }">
-          <span v-for="(v, j) in calc.sB" :key="j">×2<sup>{{ String(v).replace('-', '−') }}</sup></span>
-        </div>
-        <div class="stack" :style="{ paddingTop: `${STACK_PAD - 16}px`, paddingRight: `${STACK_PAD}px` }">
-          <div v-for="t in N" :key="t" class="plane" :class="{ front: t - 1 === sel || !aSliced }"
-               :style="[planeStyle(t - 1, aSliced), { gridTemplateColumns: `repeat(${NC}, var(--cw))` }]">
-            <template v-if="t - 1 === sel || (!aSliced && t === 1)">
-              <template v-for="(row, h) in inputs.B" :key="h">
-                <div v-for="(x, j) in row" :key="j" class="cell"
-                     :style="s === 0 ? tintFp(x) : s === 1 ? tintBits(calc.Bc[h][j], calc.l2P + 1) : {}"
-                     @mouseenter="hover = infoB(h, j)">
-                  {{ s === 0 ? fmtFp(x) : s === 1 ? fmtInt(calc.Bc[h][j]) : calc.Blo[sel][h][j] }}
-                </div>
-              </template>
-            </template>
-            <span v-if="aSliced && t - 1 === sel" class="tag">mod {{ calc.mods[sel] }}</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="op">=</div>
-
       <!-- C -->
       <div class="mat">
         <div class="label" v-html="tex(s === 3 ? 'C_i' : s === 4 ? (corrected ? `C'' = A'B'` : 'S') : 'C')" />
-        <div class="stack" :style="{ paddingTop: `${STACK_PAD - 16}px`, paddingRight: `${STACK_PAD}px` }">
+        <div class="stack" :style="{ paddingTop: `${STACK_PAD}px`, paddingRight: `${STACK_PAD}px` }">
           <div v-for="t in N" :key="t" class="plane" :class="{ front: merging ? t === 1 : t - 1 === sel || !cSliced, pending: s < 3 }"
                :style="[cPlaneStyle(t - 1), { gridTemplateColumns: `repeat(${NC}, var(--cw))` }]">
             <template v-if="merging ? t === 1 : t - 1 === sel || (!cSliced && t === 1)">
@@ -425,7 +422,8 @@ const caption = computed(() => {
 
     <div class="slices" :class="{ show: s === 2 || s === 3 }">
       <span class="dim">slice</span>
-      <button v-for="(p, t) in calc.mods" :key="t" :class="{ on: t === sel }" @click="pick(t)">{{ p }}</button>
+      <button v-for="(p, t) in calc.mods" :key="t" :class="{ on: t === sel }" @click="sel = t">{{ p }}</button>
+      <span class="cta">← pick a modulus to see its {{ s === 3 ? 'GEMM' : 'slices' }}</span>
     </div>
 
     <div class="bottom">
@@ -437,16 +435,6 @@ const caption = computed(() => {
         </div>
         <p v-html="md(STEPS[s].text)" />
         <p class="hover" v-html="md(hover || 'Hover a cell to see where its value comes from.')" />
-      </div>
-      <div class="controls">
-        <div class="nav">
-          <button :disabled="s === 0" @click="step = s - 1">←</button>
-          <button :disabled="s === STEPS.length - 1" @click="step = s + 1">→</button>
-        </div>
-        <label>N = {{ N }}
-          <input v-model.number="N" type="range" min="2" max="20" @keydown.stop>
-        </label>
-        <button @click="seed = (seed * 48271) % 2147483647">new matrices</button>
       </div>
     </div>
   </div>
@@ -486,11 +474,11 @@ html.dark .oz {
 .dim { color: var(--ink-3); font-weight: 400; }
 sup { font-size: 0.72em; line-height: 0; }
 
-.figure { display: flex; align-items: flex-end; gap: 8px; }
+.figure { display: grid; grid-template-columns: auto auto; align-items: end; justify-content: center; gap: 4px; }
 .mat { display: flex; flex-direction: column; }
+.mat.b { justify-self: start; }
 .label { font-weight: 700; color: var(--ink-2); margin-bottom: 2px; }
 .explain :deep(.katex), .label :deep(.katex), .tag :deep(.katex) { font-size: 1.08em; }
-.op { font-size: 20px; color: var(--ink-3); padding-bottom: 50px; }
 
 .with-shifts { display: flex; align-items: flex-end; }
 .shifts { color: var(--ink-2); font-size: 10.5px; opacity: 0; transition: opacity 0.3s; font-family: var(--slidev-code-font-family, ui-monospace, monospace); }
@@ -540,6 +528,7 @@ sup { font-size: 0.72em; line-height: 0; }
 .slices { display: flex; align-items: center; gap: 3px; margin-top: 8px; flex-wrap: wrap; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
 .slices.show { opacity: 1; pointer-events: auto; }
 .slices .dim { margin-right: 4px; font-size: 11px; }
+.cta { margin-left: 8px; color: var(--accent); font-size: 11.5px; font-style: italic; }
 
 button {
   padding: 2px 7px;
@@ -563,7 +552,7 @@ button:disabled { opacity: 0.35; cursor: default; }
 .caption.ok { color: var(--good-text); font-weight: 600; }
 .replay { padding: 0 6px; font-weight: 400; }
 .hover { color: var(--ink-2); font-style: italic; font-size: 11.5px; min-height: 1.4em; font-family: var(--slidev-code-font-family, ui-monospace, monospace); font-style: normal; }
-.controls { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; color: var(--ink-2); font-size: 12px; }
+.controls { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; align-self: end; padding: 0 52px 12px 0; color: var(--ink-2); font-size: 12px; }
 .controls label { display: flex; align-items: center; gap: 6px; }
 .controls input { width: 110px; accent-color: var(--accent); }
 .nav { display: flex; gap: 4px; }
