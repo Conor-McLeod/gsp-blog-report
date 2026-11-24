@@ -10,7 +10,7 @@ import TileExchange from './components/TileExchange.vue'
 import StageTimeline from './components/StageTimeline.vue'
 </script>
 
-# Node-level Parallelisation of Ozaki Scheme II
+# Node-level Parallelisation of Ozaki Scheme II (WIP)
 
 <p class="authors">Conor McLeod</p>
 
@@ -20,8 +20,7 @@ import StageTimeline from './components/StageTimeline.vue'
 Driven by the AI boom, NVIDIAs newest accelerators increasingly prioritise low precision GEMMs ahead of FP64 GEMMs. 
 To keep FP64 GEMMs fast, we look to emulation techniques.
 The Ozaki Scheme II is an efficient FP64 GEMM emulation technique which uses the Chinese Remainder Theorem to perform double precision GEMMs on the INT8 tensor cores.
-This summer, I worked on a node-level Ozaki scheme library which runs on JUPITER. 
-
+This summer, I worked on a node-level Ozaki scheme library which runs on the quad GH200 nodes of JUPITER.
 
 <p class="keywords"><b>Keywords:</b> GEMM, Ozaki Scheme, Chinese Remainder Theorem</p>
 
@@ -122,11 +121,15 @@ We perform the matrix multiplication on these residues
 ### 2.3 INT8 Tensor Cores
 
 Tensor cores are specialised hardware units on Nvidia GPUs for performing matrix multiplication. Tensor cores support different number formats, and the lower the format, the better the performance.
+The GH200 spec sheet lists the INT8 tensor core performance at 1,979 TOPS and the FP64 tensor core performance at 67 TFLOPS, making INT8 GEMMS about $30 \times$ faster than the FP64 GEMMS.
+So in the time it takes to do a single tensor core FP64 GEMM, we can theoretically do 30 GEMMS in INT8.
+This fact forms a fundamental motivation for the Ozaki Scheme II.
 
 ## 3. par_gemmul8
 
 The library I worked on, `par_gemmul8`, is based on [GEMMul8](https://github.com/RIKEN-RCCS/GEMMul8), the Ozaki II library developed by Yuki Uchino et. al., authors of the Ozaki II paper.
-Our library builds on GEMMul8, adapting it for JUPITER's 4xGH200 nodes.
+Our library builds on GEMMul8, adapting it for JUPITER's nodes, each of which consists of four GH200 Grace Hopper superchips.
+Each GH200 is a H100 GPU
 The core thesis is that by using the fast interconnects of JUPITER's nodes
 For comparison purposes, we vendored the `par_gemmul8` code into our library.
 <!--reference the particular commit at which we vendored GEMMul8, since the library has evolved since then-->
