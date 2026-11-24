@@ -59,20 +59,23 @@ So the need for the Ozaki scheme arises out of  economic factors just as much as
 So if science and engineering want to pursue the best high-precision GEMM performance, they must adapt to the way the hardware being designed today.[^1]
 
 
-Nvidia added FP64 emulation on INT8 tensor cores to cuBLAS in [CUDA Toolkit 13.0 Update 2](https://developer.nvidia.com/blog/unlocking-tensor-core-performance-with-floating-point-emulation-in-cublas/).
+NVIDIA added FP64 emulation on INT8 tensor cores to cuBLAS in [CUDA Toolkit 13.0 Update 2](https://developer.nvidia.com/blog/unlocking-tensor-core-performance-with-floating-point-emulation-in-cublas/).
 
 
 ## 2. Background 
 
 ### 2.1 Chinese Remainder Theroem
 
-The Chinese Remainder Theorem (CRT) says that if you know the remainders of an unknown integer $x$ when divided by each of a set of pairwise coprime integers, then $x$ is uniquely determined modulo the product of those integers.
-Its applications include the [Prime-factor FFT algorithm](https://en.wikipedia.org/wiki/Prime-factor_FFT_algorithm) and implementations of [RSA cryptography](https://en.wikipedia.org/wiki/RSA_cryptosystem#Using_the_Chinese_remainder_algorithm).
+The Chinese Remainder Theorem (CRT) says that if you know the remainders of an unknown integer $x$ when divided by each member of a set of pairwise coprime integers, then $x$ is uniquely determined modulo the product of those integers.
+Its applications include the [prime-factor FFT algorithm](https://en.wikipedia.org/wiki/Prime-factor_FFT_algorithm) and implementations of [RSA cryptography](https://en.wikipedia.org/wiki/RSA_cryptosystem#Using_the_Chinese_remainder_algorithm).
 Roughly speaking, it gives us a way of representing a large integer as a collection of smaller ones, and, crucially, of doing arithmetic on those smaller pieces independently before recombining them.
 
-As a more formal definition, let $x \in \mathbb{Z}$, and let $p_1, \dots, p_N \in \mathbb{N}_{\ge 2}$ be pairwise coprime with $\mathcal{P} := \prod_{i=1}^{N} p_i$.
+As a more formal definition, let $x \in \mathbb{Z}$, and let $p_1, \dots, p_N \in \mathbb{N}_{\ge 2}$ be pairwise coprime with 
+$$
+\mathcal{P} := \prod_{i=1}^{N} p_i
+$$
 
-Let $q_i \in \mathbb{N}$ be the modular inverse of $\dfrac{\mathcal{P}}{p_i}$, such that:
+Let $q_i \in \mathbb{N}$ be the [modular inverse](https://en.wikipedia.org/wiki/Modular_multiplicative_inverse) of $\dfrac{\mathcal{P}}{p_i}$, such that:
 
 $$
 \frac{\mathcal{P}}{p_i}\, q_i \equiv 1 \pmod{p_i}
@@ -120,7 +123,7 @@ We perform the matrix multiplication on these residues
 
 ### 2.3 INT8 Tensor Cores
 
-Tensor cores are specialised hardware units on Nvidia GPUs for performing matrix multiplication. Tensor cores support different number formats, and the lower the format, the better the performance.
+Tensor cores are specialised hardware units on NVIDIA GPUs for performing matrix multiplication. Tensor cores support different number formats, and the lower the format, the better the performance.
 The GH200 spec sheet lists the INT8 tensor core performance at 1,979 TOPS and the FP64 tensor core performance at 67 TFLOPS, making INT8 GEMMS about $30 \times$ faster than the FP64 GEMMS.
 So in the time it takes to do a single tensor core FP64 GEMM, we can theoretically do 30 GEMMS in INT8.
 This fact forms a fundamental motivation for the Ozaki Scheme II.
