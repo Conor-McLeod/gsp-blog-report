@@ -213,11 +213,66 @@ Overall, the time drops from **14.9 ms to 12.8 ms (−14%)** with the same accur
 
 The GPU metrics confirm the second-wave effect directly. Under NCCL, each GEMM launch takes 4.36–4.66 M cycles, compared with 3.53–3.63 M with peer copy, about **23% more work** for the same multiplication. NCCL is also noisy. Its two reps differ by 1.2–1.3 ms, compared with 0.01–0.4 ms with peer copy.
 
-## 5. Profile analysis with DuckDB
+## Building a data pipeline and analysis workflow to query hundreds of Nsight systems profiles at once
+
+The Nsight Systems GUI, particularly the timeline view, is very effective for visually identifying inefficiences in the program, be they non-overlapped data movements or unintended serialisation. It's always the place to start when looking for the next optimisation opportunity in your CUDA codebase.
+
+However, what I believe it is poor at is:
+
+- **Correlating what's going on across ranks.** Multiple `.nsys-reps` can be added to the same project in the Nsight Systems GUI, but it's fiddly to try and compare what's going on across them.
+- **Rapid iteration.** Once you've identified an optimisation opportunity and are working on a fix, you want to be able to quickly evaluate whether your changes have actually moved the (often very specific) metric you care about. With the Nsight Systems GUI, you have to open the report and proceed to click around until you've found what you're looking for.
+- **Catching performance regressions.** Sometimes a performance improvement at one stage in the execution timeline causes a performance regression at another stage. The fact that this happened isn't always easy to spot, especially if the overall execution time or north star metric you're tracking has gone down.
+
+To this end, I developed a data pipeline for taking the collection of `.nsys-reps` across runs, ranks and code paths and inserting them into a single DuckDB database. 
+Then, using DuckDB's python clients, I created a portfolio of repeatable reports tracking specific performance metrics, which could be run like a performance test suite after each run.
+Since, I packaged the pipeline into a CLI tool called `nvstitch`, to provide this workflow for other projects too.
+
+### Profiling multi-GPU CUDA programs
+
+Each nsys session produces one `.nsys-rep`. An `.nsys-rep` records profiling data for every GPU that the process touches.
+So in theory, the profiling results for a whole-node program can be recorded in a single `.nsys-rep`.
+In practise, we typically profile each GPU on the node separately
+
+To profile `par_gemmul8`
+
+```bash
+for exe in run_ref_par_ozaki run_par_ozaki run_par_ozaki_async; do
+    srun bash -c 'nsys profile --trace=cuda,nvtx,mpi \
+        --force-overwrite=true \
+        --gpu-metrics-devices="$SLURM_LOCALID" \
+        -o "$0/${1}_rank%q{SLURM_PROCID}" \
+        "$2/$1" 12000 12000 12000 8 1' \
+        "$NSYS_REPORTS_DIR" "$exe" "$BUILD_DIR"
+```
+
+- If we don't explicitly pass `--trace=cuda,nvtx,mpi`, then `nsys` traces `cuda,nvtx,osrt,opengl`. We would lose `mpi` events in the profiles, and we would be tracing OS runtime calls (`osrt`) which tell us almost nothing while happening to taking up over 90% of the rows and size of the profile files.
+- We also pass `--gpu-metrics-devicesa="$SLURM_LOCALID"`, which samples SM clock and utilisation.
+
+This gives us 12 `.nsys-rep` reports per invocation: 4 GPUs on each node $\times$ 3 code paths.
+The next step is get these reports off the cluster and on to a workstation, where they can be analysed in the Nsight Systems GUI; this is done easily with an rsync command.
+
+`.nsys-rep` files are a closed binary format which can only be read by Nsight Systems, and they're heavily compressed.
+But by using the `nsys export` command, we can export them to a number of different formats: `sqlite, hdf, info, arrow, jsonlines, arrowdir, parquetdir`.
+Exporting to `.sqlite` is tempting, since this gives us a DB file we can start querying against instantly. But `.sqlite` is an uncompressed format, and the same nsys report exported to an `.sqlite` file is usually orders of magnitude larger, from MBs to hundreds of MBs.
+I find that `nsys export --type parqetdir` is the better option.
+
+### DuckDB
+
+[DuckDB](https://duckdb.org/) is an in-process analytical database — you can think of it as SQLite3 but for analytics. It has a great CLI and clients for most major languages. The Python client runs DuckDB inside a Python process.
 
 Due to the nature of the codebase, I was 12 NSight Systems
 
-[DuckDB](https://duckdb.org/) is an in-process analytical database — you can think of it as SQLite3 but for analytics. It has a great CLI and clients for most major languages. The Python client runs DuckDB inside a Python process.
+Each run generated 12 Nsight Systems reports (`.nsys-reps`).
+
+The goal here was to be able to create repeatable "questions" .
+
+After a new set of changes, instead of poking around in Nsight Systems GUI,
+
+#### Clock speed oddities
+
+Something came up when profiling.
+
+Eventually, I was able to attribute this to clock speed throttling.
 
 ## 6. Conclusion
 
