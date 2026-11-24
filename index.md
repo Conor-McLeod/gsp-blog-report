@@ -8,6 +8,7 @@ import CrtExplorer from './components/CrtExplorer.vue'
 import OzakiSteps from './components/OzakiSteps.vue'
 import TileExchange from './components/TileExchange.vue'
 import StageTimeline from './components/StageTimeline.vue'
+import Float64Explorer from './components/Float64Explorer.vue'
 </script>
 
 # Node-level Parallelisation of Ozaki Scheme II (WIP)
@@ -61,8 +62,20 @@ So if science and engineering want to pursue the best high-precision GEMM perfor
 
 NVIDIA added FP64 emulation on INT8 tensor cores to cuBLAS in [CUDA Toolkit 13.0 Update 2](https://developer.nvidia.com/blog/unlocking-tensor-core-performance-with-floating-point-emulation-in-cublas/).
 
+## 2. Background
 
-## 2. Background 
+## 2.1 Number formats
+
+As a brief refresher, let us review two number formats important for understanding this report.
+
+Two represent integers in binary,
+Each bit represents a power of 2. The rightmost bit represents $2^0 = 1$. So the number INT8
+
+This system only lets you represent positive (_unsigned_) integers. To represent _signed_ integers, we use a convention called [Two's Complement](https://en.wikipedia.org/wiki/Two%27s_complement).
+
+Float64 (a.k.a FP64, `double`) uses
+
+<Float64Explorer />
 
 ### 2.1 Chinese Remainder Theroem
 
